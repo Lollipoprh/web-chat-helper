@@ -1,5 +1,7 @@
 # Web Chat Helper
 
+[English](README.md)
+
 一个可以读取并操作当前网页的 Chrome 扩展 AI 助手。它对接任意 **OpenAI 兼容** 的 Chat Completions API —— 供应商、模型和密钥都由你自己配置。
 
 纯 Manifest V3 Chrome 扩展：没有后端、没有本地服务、不依赖 Playwright 或 CDP。
@@ -80,11 +82,6 @@ web-chat-helper/
 1. **Agent Loop 跑在 Side Panel，而不是 Service Worker** —— MV3 的 Service Worker 空闲时会被挂起，长循环无法存活。
 2. **Content Script 永远看不到 API Key** —— 只有 Side Panel 与模型通信。
 3. **不持久化 DOM 节点引用** —— 每次操作前重新定位目标，页面跳转或 SPA 路由变化时安全失败，而不是操作失效节点。
-
-## 文档
-
-- [第一版实现流程.md](第一版实现流程.md) —— V1 实施阶段与验收标准
-- [完整方案.md](完整方案.md) —— 完整架构与后续路线
 
 ## 当前状态
 

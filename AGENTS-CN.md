@@ -1,5 +1,7 @@
 # AGENTS-CN.md
 
+[English](AGENTS.md)
+
 本文件面向在本仓库中工作的 AI 编码助手。
 
 ## 项目是什么
@@ -60,7 +62,7 @@ pnpm dev         # Vite + CRXJS 热更新，用于手动调试
 - 阶段 6 —— 权限、确认、取消、检查点、中断任务处理：**已实现**。`click_element` 与 `fill_input` 执行前弹出确认弹窗（展示脱敏后的参数），等待期间工具卡片显示「等待确认」；Side Panel 的「停止」按钮可同时取消已发起的模型请求、在飞的工具与等待确认中的 Promise。每轮结束后把完整的 `messages[]`（含 tool 角色消息）、`taskId`、`rounds` 持久化到独立的 `agentCheckpoint` 存储键；下次打开 Side Panel 时若读到未完成检查点则显示橙色提示，**绝不自动重放副作用步骤**。
 - 阶段 7 —— **进行中**：生产构建已加固（关闭 sourcemap、显式 es2022 target），`INSTALL-CN.md` 覆盖 load-unpacked 步骤、供应商配置、10 场景测试矩阵和诊断日志说明。等待用户在真实 Chrome + 真实 OpenAI 兼容服务 + 普通 HTTPS 页面上执行测试矩阵。运行时不依赖 Node.js / DSH / CDP / 本地服务。
 
-阶段 N+1 不得在阶段 N 未通过验收时开始。各阶段验收清单见 `第一版实现流程.md`，完整设计见 `完整方案.md`。
+阶段 N+1 不得在阶段 N 未通过验收时开始。
 
 ## 完成前的验证要求
 

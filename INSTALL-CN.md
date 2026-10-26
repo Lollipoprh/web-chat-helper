@@ -1,5 +1,7 @@
 # Web Chat Helper —— 安装与验证指南
 
+[English version](INSTALL.md)
+
 ## 一、前置条件
 
 | 条件 | 说明 |

@@ -1,5 +1,7 @@
 # Web Chat Helper
 
+[中文说明](README-CN.md)
+
 A Chrome extension AI assistant that reads and operates the current web page. It talks to any **OpenAI-compatible** Chat Completions API, so you bring your own provider, model, and API key.
 
 The extension is a pure Manifest V3 Chrome extension — no backend, no local server, no Playwright or CDP.
@@ -80,11 +82,6 @@ Three rules shape the design:
 1. **The agent loop lives in the Side Panel**, not the service worker — MV3 service workers are suspended when idle, which kills long-running loops.
 2. **The content script never sees the API key.** Only the Side Panel talks to the model.
 3. **DOM references are never persisted.** Every action re-locates its target, so navigation and SPA route changes fail safely instead of acting on stale nodes.
-
-## Documentation
-
-- [第一版实现流程.md](第一版实现流程.md) — V1 implementation stages and acceptance criteria
-- [完整方案.md](完整方案.md) — full architecture and roadmap
 
 ## Status
 

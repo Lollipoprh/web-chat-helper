@@ -1,5 +1,7 @@
 # AGENTS.md
 
+[中文说明](AGENTS-CN.md)
+
 Guidance for AI coding agents working in this repository.
 
 ## What this project is
@@ -60,7 +62,7 @@ The app depends on the three packages using the `workspace:*` protocol.
 - Phase 6 — permissions, confirmation, cancellation, checkpoints, interrupted-task handling: **implemented**. `click_element` and `fill_input` require explicit user confirmation before execution, with the running tool card marked as awaiting confirmation and a inline confirm/reject dialog showing the redacted args. All tools and in-flight confirmation prompts honour the abort signal from the Side Panel's Stop button. Each completed round persists a checkpoint (`taskId`, full `messages[]`, `rounds`) to a dedicated `agentCheckpoint` storage key; the Side Panel shows a warning banner with the interrupted round on next open and never auto-replays side-effect steps.
 - Phase 7 — **in progress**: production build hardened (sourcemap disabled, explicit es2022 target), `INSTALL-CN.md` covers load-unpacked steps, provider setup, a 10-scenario test matrix and diagnostic logging. Waiting for user to execute the real-Chrome test matrix against at least one OpenAI-compatible provider and ordinary HTTPS pages. No Node.js / DSH / CDP / local services required at runtime.
 
-Phase N+1 must not start while phase N fails its acceptance criteria. See `第一版实现流程.md` for the per-phase acceptance list and `完整方案.md` for the wider design.
+Phase N+1 must not start while phase N fails its acceptance criteria.
 
 ## Verification expectations
 

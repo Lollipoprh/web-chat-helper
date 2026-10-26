@@ -1,5 +1,7 @@
 # Web Chat Helper —— Installation & Verification Guide
 
+[中文版本](INSTALL-CN.md)
+
 ## 1. Prerequisites
 
 | Requirement | Notes |
