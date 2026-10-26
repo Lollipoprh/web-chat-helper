@@ -52,18 +52,6 @@ The app depends on the three packages using the `workspace:*` protocol.
 - Keep `manifest.config.ts` permissions minimal. Add host access through `optional_host_permissions` and request it on user gesture, not on install.
 - PowerShell on Windows: create directories with `New-Item -ItemType Directory -Force`, avoid `mkdir -p`, brace expansion and `&&` chaining.
 
-## Implementation status
-
-- Phase 1 — scaffolding: **done** (build, typecheck, unpacked load).
-- Phase 2 — provider settings page, `chrome.storage.local` persistence, endpoint normalization, connection test: **implemented**, manual load test pending.
-- Phase 3 — Chat Completions client (non-streaming, SSE streaming, cancellation) and chat UI with persisted history: **implemented**, manual load test pending.
-- Phase 4 — agent loop, tool registry, JSON-Schema-subset validation, tool-call accumulation (streamed fragments merged by index), round cap, duplicate-call guard, redacted logs: **implemented**, manual load test pending. The `echo` diagnostic tool still exists in `agent-core` but is no longer registered.
-- Phase 5 — browser tools, in order: `get_active_tab`, `get_page_snapshot`, `find_elements`, `click_element`/`fill_input`/`scroll_page`, `wait_for_element`/`verify_action`: **implemented**, manual load test pending. The Side Panel registers all eight tools and binds each task to the active tab at send time. `packages/browser-tools` exposes the tool factories and a transport interface; the extension implements the transport, the Service Worker routes/authorizes/injects, and the Content Script performs DOM work. Content scripts are injected on demand only after the user grants the site (manifest `content_scripts` uses a never-matching placeholder so the build emits the files without auto-injection).
-- Phase 6 — permissions, confirmation, cancellation, checkpoints, interrupted-task handling: **implemented**. `click_element` and `fill_input` require explicit user confirmation before execution, with the running tool card marked as awaiting confirmation and a inline confirm/reject dialog showing the redacted args. All tools and in-flight confirmation prompts honour the abort signal from the Side Panel's Stop button. Each completed round persists a checkpoint (`taskId`, full `messages[]`, `rounds`) to a dedicated `agentCheckpoint` storage key; the Side Panel shows a warning banner with the interrupted round on next open and never auto-replays side-effect steps.
-- Phase 7 — **in progress**: production build hardened (sourcemap disabled, explicit es2022 target), `INSTALL-CN.md` covers load-unpacked steps, provider setup, a 10-scenario test matrix and diagnostic logging. Waiting for user to execute the real-Chrome test matrix against at least one OpenAI-compatible provider and ordinary HTTPS pages. No Node.js / DSH / CDP / local services required at runtime.
-
-Phase N+1 must not start while phase N fails its acceptance criteria.
-
 ## Verification expectations
 
 Before reporting work as complete:

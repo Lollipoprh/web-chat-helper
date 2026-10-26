@@ -52,18 +52,6 @@ pnpm dev         # Vite + CRXJS 热更新，用于手动调试
 - `manifest.config.ts` 权限保持最小化。新增站点访问走 `optional_host_permissions`，在用户手势中申请，而不是安装时申请。
 - Windows 下的 PowerShell：创建目录用 `New-Item -ItemType Directory -Force`，避免 `mkdir -p`、花括号展开和 `&&` 串联。
 
-## 实施进度
-
-- 阶段 1 —— 工程骨架：**已完成**（可构建、类型检查通过、可作为未打包扩展加载）。
-- 阶段 2 —— 供应商设置页、`chrome.storage.local` 持久化、地址规范化、连接测试：**已实现**，等待手动加载验证。
-- 阶段 3 —— Chat Completions 客户端（非流式、SSE 流式、取消）与聊天界面、历史持久化：**已实现**，等待手动加载验证。
-- 阶段 4 —— Agent Loop、工具注册表、JSON Schema 子集参数校验、流式 tool_calls 按 index 累积、轮次上限、重复调用拦截、脱敏日志：**已实现**，等待手动加载验证。`echo` 诊断工具仍保留在 `agent-core`，但已不再注册。
-- 阶段 5 —— 浏览器工具，顺序：`get_active_tab`、`get_page_snapshot`、`find_elements`、`click_element`/`fill_input`/`scroll_page`、`wait_for_element`/`verify_action`：**已实现**，等待手动加载验证。侧边栏注册全部 8 个工具，并在发送时把任务绑定到当前活动标签页。`packages/browser-tools` 提供工具工厂与 transport 接口；扩展实现 transport，Service Worker 负责路由、权限与注入，Content Script 负责 DOM 操作。Content Script 只在用户授权站点后按需注入（manifest 的 `content_scripts` 使用永不匹配的占位域名，仅用于产出构建文件，不会自动注入）。
-- 阶段 6 —— 权限、确认、取消、检查点、中断任务处理：**已实现**。`click_element` 与 `fill_input` 执行前弹出确认弹窗（展示脱敏后的参数），等待期间工具卡片显示「等待确认」；Side Panel 的「停止」按钮可同时取消已发起的模型请求、在飞的工具与等待确认中的 Promise。每轮结束后把完整的 `messages[]`（含 tool 角色消息）、`taskId`、`rounds` 持久化到独立的 `agentCheckpoint` 存储键；下次打开 Side Panel 时若读到未完成检查点则显示橙色提示，**绝不自动重放副作用步骤**。
-- 阶段 7 —— **进行中**：生产构建已加固（关闭 sourcemap、显式 es2022 target），`INSTALL-CN.md` 覆盖 load-unpacked 步骤、供应商配置、10 场景测试矩阵和诊断日志说明。等待用户在真实 Chrome + 真实 OpenAI 兼容服务 + 普通 HTTPS 页面上执行测试矩阵。运行时不依赖 Node.js / DSH / CDP / 本地服务。
-
-阶段 N+1 不得在阶段 N 未通过验收时开始。
-
 ## 完成前的验证要求
 
 在宣称任务完成之前：

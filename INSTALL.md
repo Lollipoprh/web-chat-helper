@@ -138,5 +138,5 @@ The manifest uses the **never-matching** placeholder `web-chat-helper.invalid/*`
 - **Never hard-coded**: the key is stored in `chrome.storage.local` and wiped when the extension is uninstalled.
 - **Logs are redacted**: all tool arguments and request headers go through the redaction pipeline before being written to Console.
 
-### Q: What is the V1 scope?
-V1 freezes at 8 browser tools + Agent Loop + confirmation gate + cancellation + checkpoint. Future versions (V2+) may add: long-running cross-tab tasks, visual understanding, more side-effect actions, multi-tab coordination, streaming tools for local Ollama.
+### Q: What is the current scope?
+The extension exposes 8 browser tools plus the agent loop, confirmation gate, cancellation and checkpoint. Future versions may add: long-running cross-tab tasks, visual understanding, more side-effect actions, multi-tab coordination, streaming tools for local Ollama.

@@ -6,7 +6,7 @@ A Chrome extension AI assistant that reads and operates the current web page. It
 
 The extension is a pure Manifest V3 Chrome extension — no backend, no local server, no Playwright or CDP.
 
-## What V1 delivers
+## Features
 
 - **Side Panel chat UI** — task input, streaming output, stop button, persisted history.
 - **Provider settings page** — add / edit / delete / select providers (Base URL, API Key, Model, streaming and tool-call switches) plus a connection test.
@@ -15,7 +15,7 @@ The extension is a pure Manifest V3 Chrome extension — no backend, no local se
 - **Browser tools** — read the active tab, page snapshot, element lookup, click, fill, scroll, wait and verify.
 - **Safety** — per-site host permissions, user confirmation for side-effecting actions, cancellation, interrupted-task marking.
 
-Out of scope for V1: Playwright/CDP automation, a standalone backend, MCP, multi-agent orchestration, long-term memory and full visual automation.
+Out of scope: Playwright/CDP automation, a standalone backend, MCP, multi-agent orchestration, long-term memory and full visual automation.
 
 ## Requirements
 
@@ -85,7 +85,7 @@ Three rules shape the design:
 
 ## Status
 
-Phases 1–6 are implemented. Phase 6 adds: (1) confirmation before running side-effecting tools (`click_element`, `fill_input`) with an inline confirm/reject dialog and a new `awaiting_confirmation` tool-card state, (2) abort signal propagation through pending confirmations, model requests and in-flight tools, (3) per-round checkpoint persistence (`agentCheckpoint` key) carrying the full messages array (incl. tool-role messages), and (4) on Side Panel open, an interrupted-task warning banner that never auto-replays side-effect steps. Phase 7 (production packaging and real-Chrome test matrix) remains; phases 2–6 manual load testing is still pending.
+All core features are implemented: side-effecting tools require explicit user confirmation, abort signals propagate through model requests / in-flight tools / pending confirmations, per-round checkpoint persistence survives Side Panel close or extension restart, and the interrupted-task banner never auto-replays side-effect steps.
 
 ## License
 
