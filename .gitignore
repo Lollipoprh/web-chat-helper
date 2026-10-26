@@ -1,0 +1,26 @@
+# Dependencies
+node_modules
+
+# Build artifacts
+dist
+*.tsbuildinfo
+coverage
+
+# Tool caches
+.vite
+.crxjs
+.pnpm-store
+pnpm-debug.log*
+
+# Environment / local overrides — never commit secrets
+.env
+.env.*
+.env.local
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+.vscode
+.idea

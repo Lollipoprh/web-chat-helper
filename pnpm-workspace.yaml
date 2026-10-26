@@ -1,0 +1,8 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm 12 构建脚本安全策略：显式批准需要运行 pre/postinstall 的包
+# esbuild 下载平台二进制，必须允许
+allowBuilds:
+  esbuild: true
