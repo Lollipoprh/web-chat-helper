@@ -55,6 +55,8 @@ export interface AgentRunOptions {
   limits?: Partial<AgentLimits>
   signal?: AbortSignal
   tabId?: number
+  /** 宿主可预先指定任务 ID，便于在任务开始前就关联日志与界面状态 */
+  taskId?: string
   onTextDelta?: (delta: string) => void
   onToolEvent?: (event: AgentToolEvent) => void
   onLog?: (log: AgentToolLog) => void
@@ -69,7 +71,7 @@ export interface AgentRunOptions {
 
 export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunResult> {
   const limits: AgentLimits = { ...DEFAULT_AGENT_LIMITS, ...options.limits }
-  const taskId = crypto.randomUUID()
+  const taskId = options.taskId ?? crypto.randomUUID()
   const messages: ChatMessage[] = [...options.messages]
   const logs: AgentToolLog[] = []
   const executedSignatures = new Set<string>()

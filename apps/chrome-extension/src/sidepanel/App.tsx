@@ -12,6 +12,7 @@ import {
   runAgentLoop,
   type AgentToolEvent,
   type ConfirmationRequest,
+  type StopReason,
 } from 'agent-core'
 import { createBrowserTools } from 'browser-tools'
 import {
@@ -27,6 +28,14 @@ import {
   type AgentCheckpointRecord,
 } from '../shared/checkpoint-storage'
 import { createBrowserTransport } from '../shared/browser-transport'
+import {
+  finishTask,
+  markInterruptedTasks,
+  pruneLogs,
+  recordStep,
+  recordTaskStart,
+  type LogTaskStatus,
+} from '../shared/step-log-storage'
 import {
   isRequestableOriginPattern,
   originPatternFromUrl,
@@ -94,6 +103,18 @@ export default function App() {
     const defaultProvider = await loadDefaultProvider()
     setProvider(defaultProvider)
     setLoading(false)
+  }, [])
+
+  // 启动时收尾：把上次未正常结束的任务标为中断，并按保留策略清理过期日志
+  useEffect(() => {
+    void (async () => {
+      try {
+        await markInterruptedTasks()
+        await pruneLogs()
+      } catch (error) {
+        console.warn('[step-log] 日志收尾失败', error)
+      }
+    })()
   }, [])
 
   // 读取历史与中断检查点
@@ -297,6 +318,17 @@ export default function App() {
     const controller = new AbortController()
     abortRef.current = controller
 
+    // 任务 ID 在发送时确定，日志与检查点共用，便于按任务检索
+    const taskId = crypto.randomUUID()
+    const taskStartPromise = recordTaskStart({
+      taskId,
+      goal: text,
+      tabId: boundTabId,
+      tabUrl: activeTabRef.current?.url,
+    })
+    let taskStatus: LogTaskStatus = 'failed'
+    let taskStopReason: StopReason | undefined
+
     const finalize = (status: MessageStatus, error?: string) => {
       setMessages((prev) =>
         prev.map((message) =>
@@ -316,13 +348,25 @@ export default function App() {
       )
     }
 
+    // 导航类工具可能已经把标签页带到新站点，授权必须以标签页当前地址为准
+    const refreshPendingOrigin = async () => {
+      let url = activeTabRef.current?.url
+      if (boundTabId !== undefined) {
+        try {
+          const current = await chrome.tabs.get(boundTabId)
+          if (current.url) url = current.url
+        } catch {
+          // 标签页已关闭时回退到发送时记录的地址
+        }
+      }
+      const pattern = originPatternFromUrl(url)
+      setPendingPageOrigin(pattern && isRequestableOriginPattern(pattern) ? pattern : null)
+    }
+
     const upsertToolEvent = (event: AgentToolEvent) => {
       // 站点未授权时提供一键授权入口；授权后由用户重新发送任务
       if (event.status === 'error' && event.errorCode === 'not_authorized') {
-        const pattern = originPatternFromUrl(activeTabRef.current?.url)
-        setPendingPageOrigin(
-          pattern && isRequestableOriginPattern(pattern) ? pattern : null,
-        )
+        void refreshPendingOrigin()
         setBanner(event.summary ?? '当前页面尚未授权，无法操作')
       }
       setMessages((prev) =>
@@ -342,7 +386,12 @@ export default function App() {
         // 浏览器工具经 Service Worker 转发到 Content Script；tabId 在发送时已绑定
         const transport = createBrowserTransport(boundTabId)
         const registry = new ToolRegistry()
-        for (const tool of createBrowserTools(transport)) registry.register(tool)
+        const browserTools = createBrowserTools(transport)
+        // 只读工具在超限时会被优先淘汰，因此记录该标记供日志层使用
+        const readOnlyNames = new Set(
+          browserTools.filter((tool) => tool.readOnly).map((tool) => tool.name),
+        )
+        for (const tool of browserTools) registry.register(tool)
 
         const result = await runAgentLoop({
           chat: {
@@ -358,6 +407,7 @@ export default function App() {
             ...history,
           ],
           tabId: boundTabId,
+          taskId,
           signal: controller.signal,
           onTextDelta: appendDelta,
           onToolEvent: upsertToolEvent,
@@ -373,12 +423,34 @@ export default function App() {
               }
               request.signal?.addEventListener('abort', onAbort, { once: true })
             }),
-          onCheckpoint: (messages, rounds, taskId) => {
-            void saveAgentCheckpoint({ taskId, messages, rounds, updatedAt: Date.now() })
+          onCheckpoint: (checkpointMessages, checkpointRounds) => {
+            void saveAgentCheckpoint({
+              taskId,
+              messages: checkpointMessages,
+              rounds: checkpointRounds,
+              updatedAt: Date.now(),
+            })
           },
-          // 参数已脱敏，可安全输出到控制台用于排查
-          onLog: (log) => console.debug('[agent]', log),
+          // 参数已脱敏，可安全输出到控制台；同时按任务写入 IndexedDB 日志
+          onLog: (log) => {
+            console.debug('[agent]', log)
+            void recordStep(log, {
+              taskId,
+              goal: text,
+              tabId: boundTabId,
+              tabUrl: activeTabRef.current?.url,
+              readOnly: readOnlyNames.has(log.toolName),
+            })
+          },
         })
+
+        taskStatus =
+          result.stopReason === 'completed' || result.stopReason === 'round_limit'
+            ? 'completed'
+            : result.stopReason === 'cancelled'
+              ? 'cancelled'
+              : 'failed'
+        taskStopReason = result.stopReason
 
         // 非流式时没有增量回调，直接用最终文本回填
         if (!provider.supportsStreaming && result.finalText) {
@@ -422,12 +494,14 @@ export default function App() {
         }
 
         finalize('complete')
+        taskStatus = 'completed'
       }
     } catch (error) {
       const cancelled =
         (error instanceof LLMError && error.code === 'aborted') || controller.signal.aborted
       const message = cancelled ? '已取消' : describeError(error)
 
+      taskStatus = cancelled ? 'cancelled' : 'failed'
       finalize(cancelled ? 'cancelled' : 'error', message)
       if (!cancelled) setBanner(message)
     } finally {
@@ -437,6 +511,12 @@ export default function App() {
       setPendingConfirmation(null)
       // 任务正常结束（含取消/错误）后清除检查点；只有意外关闭 Side Panel 时会留下
       void clearAgentCheckpoint()
+      // 等任务记录创建完成再写最终状态，避免读到尚未落盘的任务
+      void taskStartPromise
+        .then(() => finishTask(taskId, taskStatus, taskStopReason))
+        // 清理放到下一个任务队列，避免拖慢界面收尾
+        .then(() => setTimeout(() => void pruneLogs(), 0))
+        .catch((error: unknown) => console.warn('[step-log] 任务收尾失败', error))
     }
   }
 

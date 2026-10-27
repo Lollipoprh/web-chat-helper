@@ -15,6 +15,7 @@
 ```bash
 pnpm install     # 安装 workspace 依赖（需要 pnpm 12；esbuild 必须保留在 allowBuilds 中）
 pnpm typecheck   # 对所有 workspace 包执行 tsc --noEmit —— 完成工作前必须通过
+pnpm test        # 运行 llm-client 与 agent-core 的 Vitest 单元测试
 pnpm build       # 生产构建，产物位于 apps/chrome-extension/dist
 pnpm dev         # Vite + CRXJS 热更新，用于手动调试
 ```
@@ -58,6 +59,7 @@ pnpm dev         # Vite + CRXJS 热更新，用于手动调试
 
 ```bash
 pnpm typecheck
+pnpm test
 pnpm build
 ```
 

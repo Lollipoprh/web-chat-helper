@@ -4,7 +4,7 @@
 //       不能在此运行长循环；Agent Loop 跑在 Side Panel
 
 import type { ToolErrorCode } from 'agent-core'
-import type { ActiveTabInfo, BrowserAction, BrowserToolResponse } from 'browser-tools'
+import type { ActiveTabInfo, BrowserAction, BrowserToolResponse, NavigateResult } from 'browser-tools'
 import { BROWSER_ACTION_MESSAGE_TYPES, MESSAGE_TYPES } from '../shared/index'
 import { originPatternFromUrl } from '../shared/permissions'
 
@@ -113,6 +113,12 @@ async function handleAction(
     return { ok: true, data: info }
   }
 
+  // 导航直接由 Service Worker 执行：不读取页面内容，因此不做当前站点权限校验；
+  // 目标站点仍需单独授权，后续工具会返回 not_authorized 提示用户授权
+  if (action === 'navigate_tab') {
+    return navigateTab(tab, args)
+  }
+
   const targetTabId = tab.id
   if (targetTabId === undefined) return fail('execution_failed', '目标标签页不可用')
 
@@ -160,6 +166,78 @@ async function handleAction(
   }
 
   return normalizeContentResponse(response)
+}
+
+const NAVIGATE_TIMEOUT_MS = 20_000
+const NAVIGATE_POLL_MS = 300
+
+/**
+ * 在任务标签页里打开一个绝对 http(s) 地址。
+ * 只做导航，不读取页面内容；失败与超时都必须如实返回，不能把「已发出导航」当成「页面已就绪」。
+ */
+async function navigateTab(
+  tab: chrome.tabs.Tab,
+  args: Record<string, unknown>,
+): Promise<BrowserToolResponse<NavigateResult>> {
+  const tabId = tab.id
+  if (tabId === undefined) return fail('execution_failed', '目标标签页不可用')
+
+  const rawUrl = args.url
+  const input = typeof rawUrl === 'string' ? rawUrl.trim() : ''
+  if (!input) return fail('invalid_args', '缺少参数 url')
+
+  let target: URL
+  try {
+    target = new URL(input)
+  } catch {
+    return fail('invalid_args', `url 不是合法的绝对地址：${input}`)
+  }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    return fail('invalid_args', `只支持 http 或 https 地址，收到 ${target.protocol}`)
+  }
+
+  try {
+    await chrome.tabs.update(tabId, { url: target.href })
+  } catch (error) {
+    return fail('execution_failed', `导航失败：${describeError(error)}`)
+  }
+
+  if (args.wait_for_load === false) {
+    return { ok: true, data: { tabId, url: target.href, title: '' } }
+  }
+
+  const loaded = await waitForTabComplete(tabId, NAVIGATE_TIMEOUT_MS)
+  if (!loaded) {
+    return fail(
+      'timeout',
+      `页面在 ${Math.round(NAVIGATE_TIMEOUT_MS / 1000)} 秒内未完成加载，请用 wait_for_element 或 verify_action 确认当前状态`,
+    )
+  }
+
+  try {
+    const updated = await chrome.tabs.get(tabId)
+    return {
+      ok: true,
+      data: { tabId, url: updated.url ?? target.href, title: updated.title ?? '' },
+    }
+  } catch (error) {
+    return fail('execution_failed', `读取标签页状态失败：${describeError(error)}`)
+  }
+}
+
+/** 轮询等待标签页进入 complete 状态 */
+async function waitForTabComplete(tabId: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const current = await chrome.tabs.get(tabId)
+      if (current.status === 'complete') return true
+    } catch {
+      return false
+    }
+    await new Promise((resolve) => setTimeout(resolve, NAVIGATE_POLL_MS))
+  }
+  return false
 }
 
 async function resolveTab(tabId: number | undefined): Promise<chrome.tabs.Tab> {

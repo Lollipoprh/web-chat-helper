@@ -36,6 +36,7 @@ If `pnpm install` fails with `ERR_PNPM_IGNORED_BUILDS`, make sure `allowBuilds` 
 ```bash
 pnpm dev        # Vite dev server with CRXJS hot reload
 pnpm typecheck  # tsc --noEmit across all workspace packages
+pnpm test       # Vitest unit tests for llm-client and agent-core
 pnpm build      # production build of the extension into apps/chrome-extension/dist
 ```
 

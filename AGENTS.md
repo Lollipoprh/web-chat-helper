@@ -15,6 +15,7 @@ No backend, no local server, no Playwright/CDP, no MCP. Only Chrome APIs plus th
 ```bash
 pnpm install     # install workspace deps (needs pnpm 12; esbuild must stay in allowBuilds)
 pnpm typecheck   # tsc --noEmit for every workspace package — run before you claim work is done
+pnpm test        # vitest unit tests for llm-client and agent-core
 pnpm build       # production build; output: apps/chrome-extension/dist
 pnpm dev         # Vite + CRXJS hot reload for manual testing
 ```
@@ -58,6 +59,7 @@ Before reporting work as complete:
 
 ```bash
 pnpm typecheck
+pnpm test
 pnpm build
 ```
 

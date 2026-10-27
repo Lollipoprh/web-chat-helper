@@ -11,8 +11,10 @@ import type {
   ClickResult,
   FillResult,
   FindElementsResult,
+  NavigateResult,
   PageSnapshot,
   ScrollResult,
+  SelectResult,
   VerifyResult,
   WaitResult,
 } from './types'
@@ -208,6 +210,68 @@ export function createBrowserTools(
         return toResult(
           response,
           (data) => `已验证：${data.matched.join('、')}；当前地址 ${data.url}`,
+        )
+      },
+    },
+    {
+      name: 'navigate_tab',
+      description:
+        'Load an absolute http(s) URL in the task tab and wait until it finishes loading. Use it to open a site you cannot reach by clicking a link. The destination site needs its own host permission: if the next tool returns not_authorized, ask the user to grant the site from the side panel.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Absolute http:// or https:// URL' },
+          wait_for_load: {
+            type: 'boolean',
+            description: 'Wait until the page finishes loading (default true)',
+          },
+        },
+        required: ['url'],
+        additionalProperties: false,
+      },
+      requiresConfirmation: true,
+      async execute(args): Promise<ToolResult> {
+        const response = await send<NavigateResult>('navigate_tab', args)
+        return toResult(
+          response,
+          (data) => `已打开「${data.title || '(无标题)'}」（${data.url}）`,
+        )
+      },
+    },
+    {
+      name: 'select_option',
+      description:
+        'Choose an option in a native <select> element by value, visible label or zero-based index. Get the select ref from get_page_snapshot or find_elements first. For custom dropdown widgets, use click_element instead.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: { type: 'string', description: 'Element ref of the <select> element' },
+          value: { type: 'string', description: 'Option value attribute to select' },
+          label: { type: 'string', description: 'Visible option text to select' },
+          index: {
+            type: 'integer',
+            minimum: 0,
+            description: 'Zero-based option index to select',
+          },
+        },
+        required: ['ref'],
+        additionalProperties: false,
+      },
+      requiresConfirmation: true,
+      async execute(args): Promise<ToolResult> {
+        if (args.value === undefined && args.label === undefined && args.index === undefined) {
+          return {
+            ok: false,
+            code: 'invalid_args',
+            message: '必须提供 value、label 或 index 之一来指定选项',
+          }
+        }
+
+        const response = await send<SelectResult>('select_option', args)
+        return toResult(
+          response,
+          (data) =>
+            `已在 ${data.tag}「${data.name || data.ref}」选中「${data.selectedLabel}」（value=${data.selectedValue}，共 ${data.optionCount} 项）`,
         )
       },
     },

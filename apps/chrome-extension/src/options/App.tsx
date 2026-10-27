@@ -13,6 +13,13 @@ import {
   saveProvider,
   setDefaultProvider,
 } from '../shared/storage'
+import {
+  LOG_MAX_TASKS,
+  LOG_RETENTION_DAYS,
+  clearAllLogs,
+  getLogStats,
+  type LogStats,
+} from '../shared/step-log-storage'
 import ProviderForm from './ProviderForm'
 import {
   badgeStyle,
@@ -32,6 +39,7 @@ export default function App() {
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState<ProviderConfig | null>(null)
   const [storageError, setStorageError] = useState<string | null>(null)
+  const [logStats, setLogStats] = useState<LogStats | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -61,6 +69,30 @@ export default function App() {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  const refreshLogStats = useCallback(async () => {
+    try {
+      setLogStats(await getLogStats())
+    } catch (error) {
+      console.warn('[step-log] 读取日志统计失败', error)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshLogStats()
+  }, [refreshLogStats])
+
+  async function handleClearLogs() {
+    const confirmed = window.confirm('确定清空全部本地运行日志吗？该操作不可撤销。')
+    if (!confirmed) return
+
+    try {
+      await clearAllLogs()
+      await refreshLogStats()
+    } catch (error) {
+      setStorageError(`清空日志失败：${describeError(error)}`)
+    }
+  }
 
   async function handleSubmit(draft: ProviderDraft) {
     const now = Date.now()
@@ -254,10 +286,36 @@ export default function App() {
         />
       )}
 
+      <section style={cardStyle}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <h2 style={sectionTitleStyle}>本地运行日志</h2>
+          <button type="button" style={dangerButtonStyle} onClick={() => void handleClearLogs()}>
+            清空日志
+          </button>
+        </div>
+
+        <p style={{ margin: '12px 0 0', fontSize: 12, color: '#6b7280', lineHeight: 1.7 }}>
+          任务日志保存在本机 IndexedDB，最多保留 {LOG_RETENTION_DAYS} 天或 {LOG_MAX_TASKS}{' '}
+          个任务（先到者为准），到期自动清理。日志只记录脱敏后的工具参数与结果摘要，
+          不含页面正文、表单值、Cookie 与 API Key。
+          {logStats
+            ? ` 当前有 ${logStats.taskCount} 个任务、${logStats.stepCount} 条步骤记录。`
+            : ''}
+        </p>
+      </section>
+
       <footer style={{ marginTop: 28 }}>
         <p style={hintStyle}>
           说明：API Key 保存在 <code>chrome.storage.local</code>，并非操作系统级密钥保险库，
-          仅供个人本机使用。日志与界面中只展示脱敏后的密钥。
+          仅供个人本机使用。日志与界面中只展示脱敏后的密钥。运行日志单独存放在
+          IndexedDB，与配置存储相互隔离。
         </p>
       </footer>
     </div>

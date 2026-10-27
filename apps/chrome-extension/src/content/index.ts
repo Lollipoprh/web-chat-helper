@@ -15,6 +15,7 @@ import type {
   FindElementsResult,
   PageSnapshot,
   ScrollResult,
+  SelectResult,
   VerifyResult,
   WaitResult,
 } from 'browser-tools'
@@ -511,6 +512,83 @@ function fillInput(args: Record<string, unknown>): FillResult {
   }
 }
 
+function describeOptionChoices(options: HTMLOptionElement[]): string {
+  const labels = options.slice(0, 10).map((option) => collapse(option.label) || '(空)')
+  const suffix = options.length > labels.length ? ` 等 ${options.length} 项` : ''
+  return labels.join('、') + suffix
+}
+
+function selectOption(args: Record<string, unknown>): SelectResult {
+  const ref = readString(args, 'ref')
+  if (!ref) throw new PageToolError('invalid_args', '缺少参数 ref')
+
+  const element = resolveElement(ref)
+  if (!(element instanceof HTMLSelectElement)) {
+    throw new PageToolError(
+      'invalid_args',
+      `元素 ${ref} 不是原生下拉框（实际为 ${element.tagName.toLowerCase()}），自定义下拉组件请使用 click_element`,
+    )
+  }
+  if (!isVisible(element)) {
+    throw new PageToolError('execution_failed', `元素 ${ref} 当前不可见，可能已折叠或移除`)
+  }
+  if (isDisabled(element)) {
+    throw new PageToolError('invalid_args', `元素 ${ref} 处于禁用状态，无法选择`)
+  }
+
+  const options = Array.from(element.options)
+  if (options.length === 0) {
+    throw new PageToolError('element_not_found', `元素 ${ref} 没有任何选项`)
+  }
+
+  const choices = describeOptionChoices(options)
+  const value = readRawString(args, 'value')
+  const label = readString(args, 'label')
+  const rawIndex = args.index
+
+  let target: HTMLOptionElement | undefined
+  if (value !== undefined) {
+    target = options.find((option) => option.value === value)
+    if (!target) {
+      throw new PageToolError('invalid_args', `下拉框中不存在 value 为「${value}」的选项；可选：${choices}`)
+    }
+  } else if (label !== undefined) {
+    const wanted = collapse(label)
+    target =
+      options.find((option) => collapse(option.label) === wanted) ??
+      options.find((option) => collapse(option.label).toLowerCase() === wanted.toLowerCase())
+    if (!target) {
+      throw new PageToolError('invalid_args', `下拉框中不存在文本为「${label}」的选项；可选：${choices}`)
+    }
+  } else if (typeof rawIndex === 'number' && Number.isFinite(rawIndex)) {
+    const index = Math.trunc(rawIndex)
+    if (index < 0 || index >= options.length) {
+      throw new PageToolError('invalid_args', `index 超出范围，应在 0 到 ${options.length - 1} 之间`)
+    }
+    target = options[index]
+  } else {
+    throw new PageToolError('invalid_args', '必须提供 value、label 或 index 之一来指定选项')
+  }
+
+  // 单选下拉框要显式清空其余选项；多选下拉框保留已有选择
+  if (!element.multiple) {
+    for (const option of options) option.selected = option === target
+  }
+  target.selected = true
+  element.focus()
+  dispatchInputEvents(element, element.value)
+
+  return {
+    ref,
+    tag: element.tagName.toLowerCase(),
+    name: elementName(element),
+    selectedValue: element.value,
+    selectedLabel: collapse(target.label),
+    optionCount: options.length,
+    url: location.href,
+  }
+}
+
 function scrollPage(args: Record<string, unknown>): ScrollResult {
   const direction = readString(args, 'direction') ?? 'down'
   const amount = readNumber(
@@ -670,6 +748,7 @@ const handlers: Record<string, ActionHandler> = {
   [MESSAGE_TYPES.FIND_ELEMENTS]: (args) => findElements(args),
   [MESSAGE_TYPES.CLICK_ELEMENT]: (args) => clickElement(args),
   [MESSAGE_TYPES.FILL_INPUT]: (args) => fillInput(args),
+  [MESSAGE_TYPES.SELECT_OPTION]: (args) => selectOption(args),
   [MESSAGE_TYPES.SCROLL_PAGE]: (args) => scrollPage(args),
   [MESSAGE_TYPES.WAIT_FOR_ELEMENT]: (args) => waitForElement(args),
   [MESSAGE_TYPES.VERIFY_ACTION]: (args) => verifyAction(args),

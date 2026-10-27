@@ -36,6 +36,7 @@ pnpm install
 ```bash
 pnpm dev        # Vite 开发服务，CRXJS 热更新
 pnpm typecheck  # 对所有 workspace 包执行 tsc --noEmit
+pnpm test       # 运行 llm-client 与 agent-core 的 Vitest 单元测试
 pnpm build      # 生产构建，产物在 apps/chrome-extension/dist
 ```
 

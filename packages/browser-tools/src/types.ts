@@ -12,6 +12,8 @@ export type BrowserAction =
   | 'scroll_page'
   | 'wait_for_element'
   | 'verify_action'
+  | 'navigate_tab'
+  | 'select_option'
 
 export interface BrowserToolRequest {
   action: BrowserAction
@@ -96,4 +98,20 @@ export interface VerifyResult {
   url: string
   title: string
   matched: string[]
+}
+
+export interface NavigateResult {
+  tabId: number
+  url: string
+  title: string
+}
+
+export interface SelectResult {
+  ref: string
+  tag: string
+  name: string
+  selectedValue: string
+  selectedLabel: string
+  optionCount: number
+  url: string
 }

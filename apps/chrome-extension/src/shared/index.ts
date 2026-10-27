@@ -30,6 +30,8 @@ export const MESSAGE_TYPES = {
   SCROLL_PAGE: 'browser-tools:scroll_page',
   WAIT_FOR_ELEMENT: 'browser-tools:wait_for_element',
   VERIFY_ACTION: 'browser-tools:verify_action',
+  NAVIGATE_TAB: 'browser-tools:navigate_tab',
+  SELECT_OPTION: 'browser-tools:select_option',
   /** Service Worker 探测标签页里是否已有可用的 Content Script */
   PING: 'browser-tools:ping',
 
@@ -51,4 +53,6 @@ export const BROWSER_ACTION_MESSAGE_TYPES: Record<BrowserAction, string> = {
   scroll_page: MESSAGE_TYPES.SCROLL_PAGE,
   wait_for_element: MESSAGE_TYPES.WAIT_FOR_ELEMENT,
   verify_action: MESSAGE_TYPES.VERIFY_ACTION,
+  navigate_tab: MESSAGE_TYPES.NAVIGATE_TAB,
+  select_option: MESSAGE_TYPES.SELECT_OPTION,
 }
