@@ -8,7 +8,7 @@ The extension is a pure Manifest V3 Chrome extension — no backend, no local se
 
 ## Features
 
-- **Side Panel chat UI** — task input, streaming output, stop button, persisted history.
+- **Side Panel chat UI** — task input, streaming output, stop button, multiple persisted sessions (new / switch / delete) with task history.
 - **Provider settings page** — add / edit / delete / select providers (Base URL, API Key, Model, streaming and tool-call switches) plus a connection test.
 - **LLM client** — OpenAI-compatible Chat Completions, non-streaming and SSE streaming, multi-turn context, timeouts and cancellation.
 - **Agent loop** — tool-call parsing, argument validation, bounded rounds (10 by default), duplicate-call detection, execution logs.

@@ -314,7 +314,7 @@ export default function App() {
       <footer style={{ marginTop: 28 }}>
         <p style={hintStyle}>
           说明：API Key 保存在 <code>chrome.storage.local</code>，并非操作系统级密钥保险库，
-          仅供个人本机使用。日志与界面中只展示脱敏后的密钥。运行日志单独存放在
+          仅供个人本机使用。日志与界面中只展示脱敏后的密钥。运行日志与会话消息存放在
           IndexedDB，与配置存储相互隔离。
         </p>
       </footer>

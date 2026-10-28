@@ -1,15 +1,22 @@
 // 任务与步骤日志的 IndexedDB 持久化
 //
 // 与 chrome.storage.local 分工：
-//   - chrome.storage.local：供应商配置、聊天历史、检查点（少量，必须精确，配额 5MB）
-//   - IndexedDB：可裁剪的运行日志（量大，按任务检索，按保留策略滚动）
+//   - chrome.storage.local：供应商配置、当前活动会话（少量，必须精确，配额 5MB）
+//   - IndexedDB：可裁剪的运行日志与会话消息（量大，按任务/会话检索，按保留策略滚动）
 //
 // 落盘内容只保留脱敏摘要，绝不写入页面正文、快照全文、表单值与密钥。
 
 import type { AgentToolLog, StopReason } from 'agent-core'
-
-export const LOG_DB_NAME = 'web-chat-helper'
-export const LOG_DB_VERSION = 1
+import {
+  STEP_STORE,
+  STEP_TASK_INDEX,
+  TASK_CREATED_INDEX,
+  TASK_SESSION_INDEX,
+  TASK_STORE,
+  openLocalDb,
+  requestResult,
+  txDone,
+} from './local-db'
 
 /** 保留时长（天） */
 export const LOG_RETENTION_DAYS = 90
@@ -20,10 +27,6 @@ export const LOG_MAX_STEPS_PER_TASK = 50
 /** 单字段落盘上限，超出截断并标记 */
 export const LOG_MAX_FIELD_CHARS = 1_000
 
-const TASK_STORE = 'tasks'
-const STEP_STORE = 'steps'
-const TASK_CREATED_INDEX = 'by_createdAt'
-const STEP_TASK_INDEX = 'by_taskId'
 const DAY_MS = 24 * 60 * 60 * 1_000
 
 export type LogTaskStatus =
@@ -35,6 +38,8 @@ export type LogTaskStatus =
 
 export interface LogTaskRecord {
   taskId: string
+  /** 所属会话；旧版本写入的任务没有该字段 */
+  sessionId?: string
   createdAt: number
   updatedAt: number
   /** 用户任务原文（截断） */
@@ -71,48 +76,6 @@ export interface LogStats {
   stepCount: number
 }
 
-let dbPromise: Promise<IDBDatabase> | null = null
-
-function openDb(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise
-  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(LOG_DB_NAME, LOG_DB_VERSION)
-    request.onupgradeneeded = () => {
-      const db = request.result
-      if (!db.objectStoreNames.contains(TASK_STORE)) {
-        const store = db.createObjectStore(TASK_STORE, { keyPath: 'taskId' })
-        store.createIndex(TASK_CREATED_INDEX, 'createdAt')
-      }
-      if (!db.objectStoreNames.contains(STEP_STORE)) {
-        const store = db.createObjectStore(STEP_STORE, {
-          keyPath: 'id',
-          autoIncrement: true,
-        })
-        store.createIndex(STEP_TASK_INDEX, 'taskId')
-      }
-    }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () =>
-      reject(request.error ?? new Error('无法打开本地日志数据库'))
-  })
-  return dbPromise
-}
-
-function requestResult<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error ?? new Error('日志读写失败'))
-  })
-}
-
-function txDone(tx: IDBTransaction): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error ?? new Error('日志事务失败'))
-    tx.onabort = () => reject(tx.error ?? new Error('日志事务被中止'))
-  })
-}
-
 /** 截断单个字段，返回是否发生了截断 */
 function clamp(value: string): { text: string; truncated: boolean } {
   if (value.length <= LOG_MAX_FIELD_CHARS) return { text: value, truncated: false }
@@ -122,11 +85,12 @@ function clamp(value: string): { text: string; truncated: boolean } {
 /** 任务开始时写入任务记录（同一 taskId 重复调用不会覆盖已有状态） */
 export async function recordTaskStart(input: {
   taskId: string
+  sessionId?: string
   goal: string
   tabId?: number
   tabUrl?: string
 }): Promise<void> {
-  const db = await openDb()
+  const db = await openLocalDb()
   const now = Date.now()
   const tx = db.transaction(TASK_STORE, 'readwrite')
   const store = tx.objectStore(TASK_STORE)
@@ -137,6 +101,7 @@ export async function recordTaskStart(input: {
   if (existing === undefined) {
     const record: LogTaskRecord = {
       taskId: input.taskId,
+      sessionId: input.sessionId,
       createdAt: now,
       updatedAt: now,
       goal: clamp(input.goal).text,
@@ -158,13 +123,14 @@ export async function recordStep(
   log: AgentToolLog,
   context: {
     taskId: string
+    sessionId?: string
     goal: string
     tabId?: number
     tabUrl?: string
     readOnly: boolean
   },
 ): Promise<void> {
-  const db = await openDb()
+  const db = await openLocalDb()
   const now = Date.now()
   const tx = db.transaction([TASK_STORE, STEP_STORE], 'readwrite')
   const taskStore = tx.objectStore(TASK_STORE)
@@ -178,6 +144,7 @@ export async function recordStep(
     existing ??
     ({
       taskId: context.taskId,
+      sessionId: context.sessionId,
       createdAt: now,
       updatedAt: now,
       goal: clamp(context.goal).text,
@@ -255,7 +222,7 @@ export async function finishTask(
   status: LogTaskStatus,
   stopReason?: StopReason,
 ): Promise<void> {
-  const db = await openDb()
+  const db = await openLocalDb()
   const tx = db.transaction(TASK_STORE, 'readwrite')
   const store = tx.objectStore(TASK_STORE)
   const existing = await requestResult<LogTaskRecord | undefined>(
@@ -276,7 +243,7 @@ export async function finishTask(
 
 /** 扩展启动时调用：把上次未被正常收尾的 running 任务标为 interrupted */
 export async function markInterruptedTasks(): Promise<void> {
-  const db = await openDb()
+  const db = await openLocalDb()
   const tx = db.transaction(TASK_STORE, 'readwrite')
   const store = tx.objectStore(TASK_STORE)
   const request = store.openCursor()
@@ -306,7 +273,7 @@ export async function markInterruptedTasks(): Promise<void> {
  *   2. 任务总数超过上限时，从最旧的开始继续删除
  */
 export async function pruneLogs(): Promise<void> {
-  const db = await openDb()
+  const db = await openLocalDb()
   const cutoff = Date.now() - LOG_RETENTION_DAYS * DAY_MS
   const expiredIds = await collectTaskIdsBefore(db, cutoff)
   for (const taskId of expiredIds) await deleteTaskWithSteps(db, taskId)
@@ -388,7 +355,7 @@ async function deleteTaskWithSteps(db: IDBDatabase, taskId: string): Promise<voi
 
 /** 设置页展示用的统计信息 */
 export async function getLogStats(): Promise<LogStats> {
-  const db = await openDb()
+  const db = await openLocalDb()
   const [taskCount, stepCount] = await Promise.all([
     countTasks(db),
     countSteps(db),
@@ -403,9 +370,65 @@ async function countSteps(db: IDBDatabase): Promise<number> {
 
 /** 清空全部日志，供设置页调用 */
 export async function clearAllLogs(): Promise<void> {
-  const db = await openDb()
+  const db = await openLocalDb()
   const tx = db.transaction([TASK_STORE, STEP_STORE], 'readwrite')
   tx.objectStore(TASK_STORE).clear()
   tx.objectStore(STEP_STORE).clear()
   await txDone(tx)
+}
+
+/** 读取某个会话下的任务，新的在前 */
+export async function listSessionTasks(
+  sessionId: string,
+  limit = 50,
+): Promise<LogTaskRecord[]> {
+  const db = await openLocalDb()
+  const tx = db.transaction(TASK_STORE, 'readonly')
+  const records = await requestResult<LogTaskRecord[]>(
+    tx.objectStore(TASK_STORE).index(TASK_SESSION_INDEX).getAll(
+      IDBKeyRange.only(sessionId),
+    ) as IDBRequest<LogTaskRecord[]>,
+  )
+  return records.sort((a, b) => b.createdAt - a.createdAt).slice(0, limit)
+}
+
+/** 读取一个任务的步骤，按发生顺序返回 */
+export async function listTaskSteps(taskId: string): Promise<LogStepRecord[]> {
+  const db = await openLocalDb()
+  const tx = db.transaction(STEP_STORE, 'readonly')
+  const records = await requestResult<LogStepRecord[]>(
+    tx.objectStore(STEP_STORE).index(STEP_TASK_INDEX).getAll(
+      IDBKeyRange.only(taskId),
+    ) as IDBRequest<LogStepRecord[]>,
+  )
+  return records.sort((a, b) => a.createdAt - b.createdAt || (a.id ?? 0) - (b.id ?? 0))
+}
+
+/** 删除会话时一并清理它的任务日志，避免留下无法从界面访问的孤儿数据 */
+export async function deleteTasksForSession(sessionId: string): Promise<void> {
+  const db = await openLocalDb()
+  const taskIds = await collectSessionTaskIds(db, sessionId)
+  for (const taskId of taskIds) await deleteTaskWithSteps(db, taskId)
+}
+
+function collectSessionTaskIds(db: IDBDatabase, sessionId: string): Promise<string[]> {
+  const tx = db.transaction(TASK_STORE, 'readonly')
+  const request = tx
+    .objectStore(TASK_STORE)
+    .index(TASK_SESSION_INDEX)
+    .openKeyCursor(IDBKeyRange.only(sessionId))
+
+  return new Promise<string[]>((resolve, reject) => {
+    const ids: string[] = []
+    request.onerror = () => reject(request.error ?? new Error('读取会话任务失败'))
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) {
+        resolve(ids)
+        return
+      }
+      ids.push(String(cursor.primaryKey))
+      cursor.continue()
+    }
+  })
 }

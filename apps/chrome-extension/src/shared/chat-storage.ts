@@ -1,6 +1,5 @@
-// 聊天历史持久化
-// 只保存已完成的消息；流式进行中的内容不落盘，刷新后不会残留半截回复。
-// 与供应商配置分开存放，读取时的键互不影响。
+// 旧版聊天历史（chrome.storage.local）
+// 仅用于升级时把旧记录迁移到会话库；迁移完成后由 session-storage 负责落盘。
 
 export type StoredChatRole = 'user' | 'assistant'
 
@@ -13,7 +12,7 @@ export interface StoredChatMessage {
 
 export const CHAT_MESSAGES_STORAGE_KEY = 'chatMessages'
 
-/** 上限，避免长期使用把 storage.local 写满 */
+/** 上限，避免迁移时读取过多旧数据 */
 const MAX_STORED_MESSAGES = 200
 
 export async function loadChatMessages(): Promise<StoredChatMessage[]> {
@@ -25,12 +24,6 @@ export async function loadChatMessages(): Promise<StoredChatMessage[]> {
     .filter(isStoredChatMessage)
     .sort((a, b) => a.createdAt - b.createdAt)
     .slice(-MAX_STORED_MESSAGES)
-}
-
-export async function saveChatMessages(messages: StoredChatMessage[]): Promise<void> {
-  await chrome.storage.local.set({
-    [CHAT_MESSAGES_STORAGE_KEY]: messages.slice(-MAX_STORED_MESSAGES),
-  })
 }
 
 export async function clearChatMessages(): Promise<void> {

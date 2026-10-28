@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+} from 'react'
 import {
   LLMError,
   createChatCompletion,
@@ -16,11 +23,17 @@ import {
 } from 'agent-core'
 import { createBrowserTools } from 'browser-tools'
 import {
-  clearChatMessages,
-  loadChatMessages,
-  saveChatMessages,
-  type StoredChatMessage,
-} from '../shared/chat-storage'
+  appendSessionMessage,
+  clearSessionMessages,
+  createSession,
+  deleteSession,
+  ensureSessions,
+  listSessions,
+  loadSessionMessages,
+  setActiveSessionId as saveActiveSessionId,
+  type SessionMessageRecord,
+  type SessionRecord,
+} from '../shared/session-storage'
 import {
   clearAgentCheckpoint,
   loadAgentCheckpoint,
@@ -29,6 +42,7 @@ import {
 } from '../shared/checkpoint-storage'
 import { createBrowserTransport } from '../shared/browser-transport'
 import {
+  deleteTasksForSession,
   finishTask,
   markInterruptedTasks,
   pruneLogs,
@@ -46,6 +60,7 @@ import {
   PROVIDERS_STORAGE_KEY,
   loadDefaultProvider,
 } from '../shared/storage'
+import TaskHistory from './TaskHistory'
 
 type MessageStatus = 'complete' | 'streaming' | 'error' | 'cancelled'
 
@@ -79,10 +94,13 @@ export default function App() {
   const [provider, setProvider] = useState<ProviderConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [messages, setMessages] = useState<UiMessage[]>([])
+  const [sessions, setSessions] = useState<SessionRecord[]>([])
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [view, setView] = useState<'chat' | 'history'>('chat')
   const [input, setInput] = useState('')
   const [generating, setGenerating] = useState(false)
   const [banner, setBanner] = useState<string | null>(null)
-  // 历史读取完成前不要写回存储，否则会用空数组覆盖已有记录
+  // 当前会话消息是否已加载完成，加载期间禁止切换会话
   const [historyLoaded, setHistoryLoaded] = useState(false)
   // 工具返回 not_authorized 时记录待授权的站点，供「授权当前站点」按钮使用
   const [pendingPageOrigin, setPendingPageOrigin] = useState<string | null>(null)
@@ -105,6 +123,14 @@ export default function App() {
     setLoading(false)
   }, [])
 
+  const refreshSessions = useCallback(async () => {
+    try {
+      setSessions(await listSessions())
+    } catch (error) {
+      console.warn('[session] 读取会话列表失败', error)
+    }
+  }, [])
+
   // 启动时收尾：把上次未正常结束的任务标为中断，并按保留策略清理过期日志
   useEffect(() => {
     void (async () => {
@@ -117,24 +143,22 @@ export default function App() {
     })()
   }, [])
 
-  // 读取历史与中断检查点
+  // 读取会话、当前会话消息与中断检查点（首次升级会迁移旧聊天记录）
   useEffect(() => {
     void (async () => {
-      const [stored, checkpoint] = await Promise.all([
-        loadChatMessages(),
-        loadAgentCheckpoint(),
-      ])
-      setMessages(
-        stored.map((item) => ({
-          id: item.id,
-          role: item.role,
-          content: item.content,
-          status: 'complete',
-          createdAt: item.createdAt,
-        })),
-      )
-      setHistoryLoaded(true)
-      if (checkpoint) setInterruptedCheckpoint(checkpoint)
+      try {
+        const [initial, checkpoint] = await Promise.all([ensureSessions(), loadAgentCheckpoint()])
+        const stored = await loadSessionMessages(initial.activeSessionId)
+        setSessions(initial.sessions)
+        setActiveSessionId(initial.activeSessionId)
+        setMessages(stored.map(toUiMessage))
+        if (checkpoint) setInterruptedCheckpoint(checkpoint)
+      } catch (error) {
+        console.warn('[session] 加载会话失败', error)
+        setBanner('本地会话数据读取失败，可尝试重新打开侧边栏。')
+      } finally {
+        setHistoryLoaded(true)
+      }
     })()
     void refreshProvider()
 
@@ -181,20 +205,6 @@ export default function App() {
     }
   }, [])
 
-  // 只持久化完整回复，取消或失败的内容不进入历史，也不参与下一轮上下文
-  useEffect(() => {
-    if (!historyLoaded || generating) return
-    const persisted: StoredChatMessage[] = messages
-      .filter((message) => message.status === 'complete' && message.content)
-      .map((message) => ({
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        createdAt: message.createdAt,
-      }))
-    void saveChatMessages(persisted)
-  }, [messages, generating, historyLoaded])
-
   // 有新内容时滚到底部
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' })
@@ -224,6 +234,7 @@ export default function App() {
   }, [pendingPageOrigin])
 
   const handleClear = useCallback(async () => {
+    if (!activeSessionId || generating) return
     if (!window.confirm('确定清空当前对话吗？')) return
     abortRef.current?.abort()
     confirmResolverRef.current?.(false)
@@ -232,9 +243,78 @@ export default function App() {
     setBanner(null)
     setPendingPageOrigin(null)
     setPendingConfirmation(null)
-    await Promise.all([clearChatMessages(), clearAgentCheckpoint()])
+    await Promise.all([clearSessionMessages(activeSessionId), clearAgentCheckpoint()])
     setInterruptedCheckpoint(null)
-  }, [])
+    void refreshSessions()
+  }, [activeSessionId, generating, refreshSessions])
+
+  // 切换会话：生成过程中禁止切换，避免把一条回复写进另一个会话
+  const handleSwitchSession = useCallback(
+    async (sessionId: string) => {
+      if (generating || !historyLoaded || sessionId === activeSessionId) return
+      setHistoryLoaded(false)
+      setView('chat')
+      setBanner(null)
+      setPendingPageOrigin(null)
+      try {
+        const stored = await loadSessionMessages(sessionId)
+        setMessages(stored.map(toUiMessage))
+        setActiveSessionId(sessionId)
+        await saveActiveSessionId(sessionId)
+      } catch (error) {
+        console.warn('[session] 切换会话失败', error)
+        setBanner('会话加载失败，请重试。')
+      } finally {
+        setHistoryLoaded(true)
+      }
+    },
+    [generating, historyLoaded, activeSessionId],
+  )
+
+  const handleNewSession = useCallback(async () => {
+    if (generating) return
+    try {
+      const session = await createSession()
+      setSessions((prev) => [session, ...prev])
+      setActiveSessionId(session.sessionId)
+      await saveActiveSessionId(session.sessionId)
+      setMessages([])
+      setBanner(null)
+      setPendingPageOrigin(null)
+      setPendingConfirmation(null)
+      setView('chat')
+    } catch (error) {
+      console.warn('[session] 新建会话失败', error)
+      setBanner('新建会话失败，请重试。')
+    }
+  }, [generating])
+
+  const handleDeleteSession = useCallback(async () => {
+    if (generating || !activeSessionId) return
+    if (!window.confirm('删除当前会话及其任务记录？')) return
+
+    setHistoryLoaded(false)
+    try {
+      await Promise.all([
+        deleteSession(activeSessionId),
+        deleteTasksForSession(activeSessionId),
+      ])
+      const remaining = sessions.filter((session) => session.sessionId !== activeSessionId)
+      const next = remaining.length > 0 ? remaining[0] : await createSession()
+      setSessions(remaining.length > 0 ? remaining : [next])
+      setActiveSessionId(next.sessionId)
+      await saveActiveSessionId(next.sessionId)
+      const stored = await loadSessionMessages(next.sessionId)
+      setMessages(stored.map(toUiMessage))
+      setView('chat')
+      setBanner(null)
+    } catch (error) {
+      console.warn('[session] 删除会话失败', error)
+      setBanner('删除会话失败，请重试。')
+    } finally {
+      setHistoryLoaded(true)
+    }
+  }, [generating, activeSessionId, sessions])
 
   const handleConfirmAction = useCallback(() => {
     confirmResolverRef.current?.(true)
@@ -255,7 +335,7 @@ export default function App() {
 
   async function handleSend() {
     const text = input.trim()
-    if (!text || generating || !provider) return
+    if (!text || generating || !provider || !activeSessionId) return
 
     const endpoint = parseEndpoint(provider.baseUrl)
     if (!endpoint.ok) {
@@ -315,21 +395,39 @@ export default function App() {
     setPendingPageOrigin(null)
     setGenerating(true)
 
+    // 用户消息立即落盘；助手消息等结束后一次性写入，流式中间态不入库
+    void appendSessionMessage(activeSessionId, {
+      id: userMessage.id,
+      sessionId: activeSessionId,
+      role: 'user',
+      content: userMessage.content,
+      status: 'complete',
+      createdAt: userMessage.createdAt,
+    })
+      .then(() => refreshSessions())
+      .catch((error: unknown) => console.warn('[session] 用户消息落盘失败', error))
+
     const controller = new AbortController()
     abortRef.current = controller
 
-    // 任务 ID 在发送时确定，日志与检查点共用，便于按任务检索
+    // 任务 ID 在发送时确定，日志、检查点与会话共用，便于按任务检索
     const taskId = crypto.randomUUID()
     const taskStartPromise = recordTaskStart({
       taskId,
+      sessionId: activeSessionId,
       goal: text,
       tabId: boundTabId,
       tabUrl: activeTabRef.current?.url,
     })
     let taskStatus: LogTaskStatus = 'failed'
     let taskStopReason: StopReason | undefined
+    let assistantContent = ''
+    let assistantStatus: MessageStatus = 'streaming'
+    let assistantError: string | undefined
 
     const finalize = (status: MessageStatus, error?: string) => {
+      assistantStatus = status
+      assistantError = error
       setMessages((prev) =>
         prev.map((message) =>
           message.id === assistantId ? { ...message, status, error } : message,
@@ -339,6 +437,7 @@ export default function App() {
 
     const appendDelta = (delta: string) => {
       if (controller.signal.aborted) return
+      assistantContent += delta
       setMessages((prev) =>
         prev.map((message) =>
           message.id === assistantId
@@ -436,6 +535,7 @@ export default function App() {
             console.debug('[agent]', log)
             void recordStep(log, {
               taskId,
+              sessionId: activeSessionId,
               goal: text,
               tabId: boundTabId,
               tabUrl: activeTabRef.current?.url,
@@ -454,6 +554,7 @@ export default function App() {
 
         // 非流式时没有增量回调，直接用最终文本回填
         if (!provider.supportsStreaming && result.finalText) {
+          assistantContent = result.finalText
           setMessages((prev) =>
             prev.map((message) =>
               message.id === assistantId ? { ...message, content: result.finalText } : message,
@@ -486,6 +587,7 @@ export default function App() {
           await streamChatCompletion(request, appendDelta)
         } else {
           const result = await createChatCompletion(request)
+          assistantContent = result.content
           setMessages((prev) =>
             prev.map((message) =>
               message.id === assistantId ? { ...message, content: result.content } : message,
@@ -511,6 +613,20 @@ export default function App() {
       setPendingConfirmation(null)
       // 任务正常结束（含取消/错误）后清除检查点；只有意外关闭 Side Panel 时会留下
       void clearAgentCheckpoint()
+      // 助手回复结束后一次性落盘；取消与失败的内容也保留，便于回看
+      if (assistantStatus !== 'streaming' && (assistantContent || assistantError)) {
+        void appendSessionMessage(activeSessionId, {
+          id: assistantId,
+          sessionId: activeSessionId,
+          role: 'assistant',
+          content: assistantContent,
+          status: assistantStatus,
+          createdAt: assistantMessage.createdAt,
+          error: assistantError,
+        })
+          .then(() => refreshSessions())
+          .catch((error: unknown) => console.warn('[session] 助手消息落盘失败', error))
+      }
       // 等任务记录创建完成再写最终状态，避免读到尚未落盘的任务
       void taskStartPromise
         .then(() => finishTask(taskId, taskStatus, taskStopReason))
@@ -527,7 +643,8 @@ export default function App() {
     }
   }
 
-  const canSend = Boolean(provider) && input.trim().length > 0 && !generating
+  const canSend =
+    Boolean(provider) && Boolean(activeSessionId) && input.trim().length > 0 && !generating
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -555,19 +672,6 @@ export default function App() {
           </div>
         </div>
         <button
-          onClick={handleClear}
-          style={{
-            padding: '3px 8px',
-            fontSize: 12,
-            cursor: 'pointer',
-            background: 'transparent',
-            border: '1px solid #d4d4d4',
-            borderRadius: 4,
-          }}
-        >
-          清空
-        </button>
-        <button
           onClick={openOptions}
           style={{
             padding: '3px 8px',
@@ -581,6 +685,67 @@ export default function App() {
           设置
         </button>
       </header>
+
+      <div
+        style={{
+          padding: '8px 14px',
+          borderBottom: '1px solid #e5e5e5',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          flexWrap: 'wrap',
+        }}
+      >
+        <select
+          value={activeSessionId ?? ''}
+          onChange={(event) => void handleSwitchSession(event.target.value)}
+          disabled={generating || !historyLoaded || sessions.length === 0}
+          title="切换会话"
+          style={{
+            flex: '1 1 120px',
+            minWidth: 0,
+            fontSize: 12,
+            padding: '3px 4px',
+            border: '1px solid #d4d4d4',
+            borderRadius: 4,
+            background: '#fff',
+          }}
+        >
+          {sessions.map((session) => (
+            <option key={session.sessionId} value={session.sessionId}>
+              {session.title}（{session.messageCount}）
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => void handleNewSession()}
+          disabled={generating}
+          style={toolbarButtonStyle(generating)}
+        >
+          新建
+        </button>
+        <button
+          onClick={() => void handleDeleteSession()}
+          disabled={generating || !activeSessionId}
+          style={toolbarButtonStyle(generating || !activeSessionId)}
+        >
+          删除
+        </button>
+        <button
+          onClick={handleClear}
+          disabled={generating || !activeSessionId}
+          style={toolbarButtonStyle(generating || !activeSessionId)}
+        >
+          清空
+        </button>
+        <button
+          onClick={() => setView((current) => (current === 'history' ? 'chat' : 'history'))}
+          disabled={!activeSessionId}
+          style={toolbarButtonStyle(!activeSessionId)}
+        >
+          {view === 'history' ? '返回对话' : '任务记录'}
+        </button>
+      </div>
 
       {banner && (
         <div
@@ -710,7 +875,9 @@ export default function App() {
       )}
 
       <main style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
-        {loading ? (
+        {view === 'history' && activeSessionId ? (
+          <TaskHistory sessionId={activeSessionId} />
+        ) : loading ? (
           <p style={{ color: '#9ca3af', fontSize: 12 }}>加载中…</p>
         ) : !provider ? (
           <div style={{ textAlign: 'center', color: '#4b5563', marginTop: 40 }}>
@@ -857,26 +1024,27 @@ export default function App() {
         <div ref={bottomRef} />
       </main>
 
-      <footer style={{ padding: 10, borderTop: '1px solid #e5e5e5' }}>
-        <textarea
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={provider ? '输入问题，Enter 发送，Shift+Enter 换行' : '请先配置供应商'}
-          disabled={!provider || loading}
-          rows={3}
-          style={{
-            width: '100%',
-            padding: 8,
-            fontSize: 13,
-            resize: 'none',
-            border: '1px solid #d4d4d4',
-            borderRadius: 6,
-            boxSizing: 'border-box',
-            background: provider ? '#fff' : '#fafafa',
-            fontFamily: 'inherit',
-          }}
-        />
+      {view === 'chat' && (
+        <footer style={{ padding: 10, borderTop: '1px solid #e5e5e5' }}>
+          <textarea
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={provider ? '输入问题，Enter 发送，Shift+Enter 换行' : '请先配置供应商'}
+            disabled={!provider || loading}
+            rows={3}
+            style={{
+              width: '100%',
+              padding: 8,
+              fontSize: 13,
+              resize: 'none',
+              border: '1px solid #d4d4d4',
+              borderRadius: 6,
+              boxSizing: 'border-box',
+              background: provider ? '#fff' : '#fafafa',
+              fontFamily: 'inherit',
+            }}
+          />
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           {generating ? (
             <button
@@ -916,12 +1084,36 @@ export default function App() {
             </span>
           )}
         </div>
-      </footer>
+        </footer>
+      )}
     </div>
   )
+}
+
+function toolbarButtonStyle(disabled: boolean): CSSProperties {
+  return {
+    padding: '3px 8px',
+    fontSize: 12,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    color: disabled ? '#9ca3af' : '#111827',
+    background: 'transparent',
+    border: '1px solid #d4d4d4',
+    borderRadius: 4,
+  }
 }
 
 function describeError(error: unknown): string {
   if (error instanceof LLMError) return error.message
   return error instanceof Error ? error.message : String(error)
+}
+
+function toUiMessage(record: SessionMessageRecord): UiMessage {
+  return {
+    id: record.id,
+    role: record.role,
+    content: record.content,
+    status: record.status,
+    createdAt: record.createdAt,
+    error: record.error,
+  }
 }
