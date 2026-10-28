@@ -56,9 +56,14 @@ import {
   requestOriginPermissions,
 } from '../shared/permissions'
 import {
+  AGENT_LIMITS_KEY,
   DEFAULT_PROVIDER_STORAGE_KEY,
   PROVIDERS_STORAGE_KEY,
+  UNSAFE_SKIP_CONFIRM_KEY,
+  loadAgentLimits,
   loadDefaultProvider,
+  loadSkipConfirm,
+  saveSkipConfirm,
 } from '../shared/storage'
 import TaskHistory from './TaskHistory'
 
@@ -109,6 +114,18 @@ export default function App() {
   // 上次未完成任务的检查点（Side Panel 启动时读取，仅提示，不自动重放）
   const [interruptedCheckpoint, setInterruptedCheckpoint] =
     useState<AgentCheckpointRecord | null>(null)
+  // 是否全局跳过副作用动作的用户确认（风险自担）
+  const [skipConfirm, setSkipConfirm] = useState(false)
+  // 应用级 Agent 限额；Side Panel 启动时从 chrome.storage.local 读取，实时响应设置页改动
+  const [agentLimits, setAgentLimits] = useState<{
+    maxRounds: number
+    toolTimeoutMs: number
+    requestTimeoutMs: number
+  } | null>(null)
+  // 折叠 / 展开的工具调用事件 id 集合
+  const [expandedToolEvents, setExpandedToolEvents] = useState<Set<string>>(
+    () => new Set(),
+  )
 
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -147,12 +164,19 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       try {
-        const [initial, checkpoint] = await Promise.all([ensureSessions(), loadAgentCheckpoint()])
+        const [initial, checkpoint, skip, limits] = await Promise.all([
+          ensureSessions(),
+          loadAgentCheckpoint(),
+          loadSkipConfirm(),
+          loadAgentLimits(),
+        ])
         const stored = await loadSessionMessages(initial.activeSessionId)
         setSessions(initial.sessions)
         setActiveSessionId(initial.activeSessionId)
         setMessages(stored.map(toUiMessage))
         if (checkpoint) setInterruptedCheckpoint(checkpoint)
+        setSkipConfirm(skip)
+        setAgentLimits(limits)
       } catch (error) {
         console.warn('[session] 加载会话失败', error)
         setBanner('本地会话数据读取失败，可尝试重新打开侧边栏。')
@@ -169,6 +193,19 @@ export default function App() {
       if (areaName !== 'local') return
       if (PROVIDERS_STORAGE_KEY in changes || DEFAULT_PROVIDER_STORAGE_KEY in changes) {
         void refreshProvider()
+      }
+      if (UNSAFE_SKIP_CONFIRM_KEY in changes) {
+        setSkipConfirm(changes[UNSAFE_SKIP_CONFIRM_KEY].newValue === true)
+      }
+      if (AGENT_LIMITS_KEY in changes) {
+        // 设置页保存或 reset，这里实时刷新；若该 key 被 remove（恢复默认），
+        // 读 newValue 会是 undefined，此时重新走 loadAgentLimits 兜底
+        const next = changes[AGENT_LIMITS_KEY].newValue
+        if (next && typeof next === 'object') {
+          void loadAgentLimits().then(setAgentLimits).catch(() => {})
+        } else {
+          void loadAgentLimits().then(setAgentLimits).catch(() => {})
+        }
       }
     }
     chrome.storage.onChanged.addListener(listener)
@@ -332,6 +369,32 @@ export default function App() {
     await clearAgentCheckpoint()
     setInterruptedCheckpoint(null)
   }, [])
+
+  const toggleToolEvent = useCallback((eventId: string) => {
+    setExpandedToolEvents((prev) => {
+      const next = new Set(prev)
+      if (next.has(eventId)) next.delete(eventId)
+      else next.add(eventId)
+      return next
+    })
+  }, [])
+
+  /**
+   * 全局豁免开关切换：
+   *   - 关闭 → 开启：弹出二次风险提示，确认后落盘
+   *   - 开启 → 关闭：直接落盘（始终允许用户关闭风险项）
+   */
+  const handleToggleSkipConfirm = useCallback(async () => {
+    const next = !skipConfirm
+    if (next) {
+      const ok = window.confirm(
+        '⚠️ 风险提示\n\n开启后，模型执行 click / fill / submit 等副作用动作时将不再弹窗确认，页面上的任何操作都会自动执行。\n\n请确认当前网站可信、模型指令可控。继续？',
+      )
+      if (!ok) return
+    }
+    await saveSkipConfirm(next)
+    setSkipConfirm(next)
+  }, [skipConfirm])
 
   async function handleSend() {
     const text = input.trim()
@@ -505,13 +568,17 @@ export default function App() {
             { role: 'system', content: SYSTEM_PROMPT },
             ...history,
           ],
+          limits: agentLimits ?? undefined,
           tabId: boundTabId,
           taskId,
           signal: controller.signal,
           onTextDelta: appendDelta,
           onToolEvent: upsertToolEvent,
-          onConfirmationRequest: (request) =>
-            new Promise<boolean>((resolve, reject) => {
+          onConfirmationRequest: (request) => {
+            // 用户在对话框下方勾选「允许全局自动执行风险操作」时跳过弹窗，
+            // 直接放行；此选项默认关闭，切换到开启时会弹出二次风险提示。
+            if (skipConfirm) return Promise.resolve(true)
+            return new Promise<boolean>((resolve, reject) => {
               confirmResolverRef.current = resolve
               setPendingConfirmation(request)
 
@@ -521,7 +588,8 @@ export default function App() {
                 reject(new DOMException('Aborted', 'AbortError'))
               }
               request.signal?.addEventListener('abort', onAbort, { once: true })
-            }),
+            })
+          },
           onCheckpoint: (checkpointMessages, checkpointRounds) => {
             void saveAgentCheckpoint({
               taskId,
@@ -911,6 +979,139 @@ export default function App() {
                 marginBottom: 10,
               }}
             >
+              {/* 工具调用事件：默认收起显示 name / 状态 / 耗时，点击展开 args 与 summary，
+                  且排在回复文本之前 —— 用户先看到模型做了什么，再看到最终答复 */}
+              {message.role === 'assistant' &&
+                message.toolEvents &&
+                message.toolEvents.length > 0 && (
+                  <div
+                    style={{
+                      maxWidth: '92%',
+                      width: '100%',
+                      marginBottom: 4,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                    }}
+                  >
+                    {message.toolEvents.map((event) => {
+                      const expanded = expandedToolEvents.has(event.id)
+                      const statusColor =
+                        event.status === 'error'
+                          ? '#b91c1c'
+                          : event.status === 'awaiting_confirmation'
+                            ? '#d97706'
+                            : event.status === 'running'
+                              ? '#9ca3af'
+                              : '#047857'
+                      const statusText =
+                        event.status === 'awaiting_confirmation'
+                          ? '等待确认'
+                          : event.status === 'running'
+                            ? '执行中'
+                            : event.status === 'success'
+                              ? '成功'
+                              : '失败'
+                      return (
+                        <div
+                          key={event.id}
+                          style={{
+                            fontSize: 11,
+                            color: '#4b5563',
+                            background: '#f9fafb',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: 6,
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => toggleToolEvent(event.id)}
+                            style={{
+                              width: '100%',
+                              textAlign: 'left',
+                              padding: '6px 10px',
+                              border: 'none',
+                              borderRadius: 6,
+                              cursor: 'pointer',
+                              background: 'transparent',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              fontFamily: 'inherit',
+                              color: 'inherit',
+                              fontSize: 'inherit',
+                            }}
+                          >
+                            <span style={{ color: '#9ca3af' }}>
+                              {expanded ? '▾' : '▸'}
+                            </span>
+                            <span style={{ fontFamily: 'monospace' }}>
+                              {event.name}
+                            </span>
+                            <span
+                              style={{
+                                color: statusColor,
+                                fontWeight: 500,
+                              }}
+                            >
+                              {statusText}
+                            </span>
+                            {typeof event.durationMs === 'number' && (
+                              <span style={{ color: '#9ca3af' }}>
+                                {event.durationMs}ms
+                              </span>
+                            )}
+                          </button>
+                          {expanded && (
+                            <div
+                              style={{
+                                padding: '0 10px 8px 26px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: 4,
+                              }}
+                            >
+                              {event.argsPreview && (
+                                <div
+                                  style={{
+                                    color: '#6b7280',
+                                    wordBreak: 'break-all',
+                                    fontSize: 11,
+                                  }}
+                                >
+                                  {event.argsPreview}
+                                </div>
+                              )}
+                              {event.summary && (
+                                <div
+                                  style={{
+                                    color:
+                                      event.status === 'error' ? '#b91c1c' : '#374151',
+                                    fontSize: 11,
+                                    lineHeight: 1.55,
+                                  }}
+                                >
+                                  {event.summary}
+                                </div>
+                              )}
+                              {event.errorCode && (
+                                <div
+                                  style={{
+                                    color: '#b91c1c',
+                                    fontSize: 11,
+                                  }}
+                                >
+                                  错误码：{event.errorCode}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
               <div
                 style={{
                   maxWidth: '88%',
@@ -950,74 +1151,6 @@ export default function App() {
                   </span>
                 )}
               </div>
-
-              {message.toolEvents && message.toolEvents.length > 0 && (
-                <div
-                  style={{
-                    maxWidth: '92%',
-                    width: '100%',
-                    marginTop: 6,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 4,
-                  }}
-                >
-                  {message.toolEvents.map((event) => (
-                    <div
-                      key={event.id}
-                      style={{
-                        fontSize: 11,
-                        color: '#4b5563',
-                        background: '#f9fafb',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: 6,
-                        padding: '5px 8px',
-                      }}
-                    >
-                      <span style={{ fontFamily: 'monospace' }}>{event.name}</span>
-                      <span
-                        style={{
-                          marginLeft: 6,
-                          color:
-                            event.status === 'error'
-                              ? '#b91c1c'
-                              : event.status === 'awaiting_confirmation'
-                                ? '#d97706'
-                                : event.status === 'running'
-                                  ? '#9ca3af'
-                                  : '#047857',
-                        }}
-                      >
-                        {event.status === 'awaiting_confirmation'
-                          ? '等待确认…'
-                          : event.status === 'running'
-                            ? '执行中…'
-                            : event.status === 'success'
-                              ? '成功'
-                              : '失败'}
-                      </span>
-                      {typeof event.durationMs === 'number' && (
-                        <span style={{ marginLeft: 6, color: '#9ca3af' }}>
-                          {event.durationMs}ms
-                        </span>
-                      )}
-                      <div style={{ marginTop: 2, color: '#9ca3af', wordBreak: 'break-all' }}>
-                        {event.argsPreview}
-                      </div>
-                      {event.summary && (
-                        <div
-                          style={{
-                            marginTop: 2,
-                            color: event.status === 'error' ? '#b91c1c' : '#6b7280',
-                          }}
-                        >
-                          {event.summary}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           ))
         )}
@@ -1084,6 +1217,30 @@ export default function App() {
             </span>
           )}
         </div>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            marginTop: 6,
+            fontSize: 11,
+            color: skipConfirm ? '#b91c1c' : '#6b7280',
+            cursor: 'pointer',
+            userSelect: 'none',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={skipConfirm}
+            onChange={() => void handleToggleSkipConfirm()}
+            style={{ cursor: 'pointer' }}
+          />
+          <span style={{color:'orange'}}>
+            {skipConfirm
+              ? '⚠️ 已开启：全局自动执行风险操作（不再弹窗确认）'
+              : '允许全局自动执行风险操作（默认关闭）'}
+          </span>
+        </label>
         </footer>
       )}
     </div>

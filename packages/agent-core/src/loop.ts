@@ -43,7 +43,7 @@ export interface AgentLimits {
 }
 
 export const DEFAULT_AGENT_LIMITS: AgentLimits = {
-  maxRounds: 10,
+  maxRounds: 50,
   toolTimeoutMs: 20_000,
   requestTimeoutMs: 120_000,
 }
