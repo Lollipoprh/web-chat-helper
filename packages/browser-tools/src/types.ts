@@ -14,6 +14,10 @@ export type BrowserAction =
   | 'verify_action'
   | 'navigate_tab'
   | 'select_option'
+  | 'list_tabs'
+  | 'new_tab'
+  | 'switch_tab'
+  | 'close_tab'
 
 export interface BrowserToolRequest {
   action: BrowserAction
@@ -28,6 +32,11 @@ export type BrowserToolResponse<T = unknown> =
 
 export interface BrowserToolTransport {
   send<T = unknown>(request: BrowserToolRequest): Promise<BrowserToolResponse<T>>
+  /**
+   * 标签页管理工具改变任务绑定后同步给传输层。
+   * 传输层未实现时，后续调用仍会使用初始标签页。
+   */
+  setTabId?(tabId: number | undefined): void
 }
 
 export interface ActiveTabInfo {
@@ -114,4 +123,36 @@ export interface SelectResult {
   selectedLabel: string
   optionCount: number
   url: string
+}
+
+/** 标签页摘要：仅暴露定位所需字段，不含 DOM 内容 */
+export interface TabSummary {
+  tabId: number
+  title: string
+  url: string
+  active: boolean
+}
+
+export interface TabsListResult {
+  tabs: TabSummary[]
+  total: number
+  truncated: boolean
+}
+
+export interface TabOpenResult {
+  tabId: number
+  url: string
+  title: string
+  /** 新标签页是否已成为任务绑定页 */
+  active: boolean
+}
+
+export interface SwitchTabResult {
+  tabId: number
+  url: string
+  title: string
+}
+
+export interface CloseTabResult {
+  closedTabId: number
 }

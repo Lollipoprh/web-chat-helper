@@ -32,6 +32,10 @@ export const MESSAGE_TYPES = {
   VERIFY_ACTION: 'browser-tools:verify_action',
   NAVIGATE_TAB: 'browser-tools:navigate_tab',
   SELECT_OPTION: 'browser-tools:select_option',
+  LIST_TABS: 'browser-tools:list_tabs',
+  NEW_TAB: 'browser-tools:new_tab',
+  SWITCH_TAB: 'browser-tools:switch_tab',
+  CLOSE_TAB: 'browser-tools:close_tab',
   /** Service Worker 探测标签页里是否已有可用的 Content Script */
   PING: 'browser-tools:ping',
 
@@ -55,4 +59,8 @@ export const BROWSER_ACTION_MESSAGE_TYPES: Record<BrowserAction, string> = {
   verify_action: MESSAGE_TYPES.VERIFY_ACTION,
   navigate_tab: MESSAGE_TYPES.NAVIGATE_TAB,
   select_option: MESSAGE_TYPES.SELECT_OPTION,
+  list_tabs: MESSAGE_TYPES.LIST_TABS,
+  new_tab: MESSAGE_TYPES.NEW_TAB,
+  switch_tab: MESSAGE_TYPES.SWITCH_TAB,
+  close_tab: MESSAGE_TYPES.CLOSE_TAB,
 }

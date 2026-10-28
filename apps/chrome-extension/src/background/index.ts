@@ -4,7 +4,17 @@
 //       不能在此运行长循环；Agent Loop 跑在 Side Panel
 
 import type { ToolErrorCode } from 'agent-core'
-import type { ActiveTabInfo, BrowserAction, BrowserToolResponse, NavigateResult } from 'browser-tools'
+import type {
+  ActiveTabInfo,
+  BrowserAction,
+  BrowserToolResponse,
+  CloseTabResult,
+  NavigateResult,
+  SwitchTabResult,
+  TabOpenResult,
+  TabsListResult,
+  TabSummary,
+} from 'browser-tools'
 import { BROWSER_ACTION_MESSAGE_TYPES, MESSAGE_TYPES } from '../shared/index'
 import { originPatternFromUrl } from '../shared/permissions'
 
@@ -97,6 +107,13 @@ async function handleAction(
   args: Record<string, unknown>,
   tabId: number | undefined,
 ): Promise<BrowserToolResponse<unknown>> {
+  // 标签页管理动作由 Service Worker 直接执行：不读取页面内容，也不要求站点授权。
+  // 放在 resolveTab 之前，保证绑定页被关闭后仍能新建/切换到可用标签页。
+  if (action === 'list_tabs') return listTabs(tabId)
+  if (action === 'new_tab') return createTab(tabId, args)
+  if (action === 'switch_tab') return switchTab(tabId, args)
+  if (action === 'close_tab') return closeTab(tabId, args)
+
   let tab: chrome.tabs.Tab
   try {
     tab = await resolveTab(tabId)
@@ -238,6 +255,232 @@ async function waitForTabComplete(tabId: number, timeoutMs: number): Promise<boo
     await new Promise((resolve) => setTimeout(resolve, NAVIGATE_POLL_MS))
   }
   return false
+}
+
+const MAX_LISTED_TABS = 30
+
+/**
+ * 解析任务标签页；绑定页已被关闭时回退到当前窗口的活动标签页，
+ * 让模型仍能通过标签页管理工具恢复工作。
+ */
+async function resolveTaskTab(tabId: number | undefined): Promise<chrome.tabs.Tab | undefined> {
+  if (tabId !== undefined) {
+    try {
+      return await chrome.tabs.get(tabId)
+    } catch {
+      // 绑定页已关闭，继续尝试活动标签页
+    }
+  }
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+  return tab
+}
+
+async function listTabs(
+  taskTabId: number | undefined,
+): Promise<BrowserToolResponse<TabsListResult>> {
+  const taskTab = await resolveTaskTab(taskTabId)
+  if (!taskTab) return fail('execution_failed', '没有可用的标签页')
+
+  try {
+    const tabs = await chrome.tabs.query({ windowId: taskTab.windowId })
+    const withId = tabs.filter(
+      (tab): tab is chrome.tabs.Tab & { id: number } => tab.id !== undefined,
+    )
+    const summaries: TabSummary[] = withId.slice(0, MAX_LISTED_TABS).map((tab) => ({
+      tabId: tab.id,
+      title: tab.title ?? '',
+      url: tab.url ?? tab.pendingUrl ?? '',
+      active: tab.active === true,
+    }))
+    return {
+      ok: true,
+      data: {
+        tabs: summaries,
+        total: withId.length,
+        truncated: withId.length > summaries.length,
+      },
+    }
+  } catch (error) {
+    return fail('execution_failed', `读取标签页列表失败：${describeError(error)}`)
+  }
+}
+
+/**
+ * 在任务所在窗口新建标签页。
+ * active=true（默认）时新页成为绑定页；只创建不读页面，因此不需要站点授权。
+ */
+async function createTab(
+  taskTabId: number | undefined,
+  args: Record<string, unknown>,
+): Promise<BrowserToolResponse<TabOpenResult>> {
+  let url: string | undefined
+  if (args.url !== undefined) {
+    const rawUrl = typeof args.url === 'string' ? args.url.trim() : ''
+    if (!rawUrl) return fail('invalid_args', 'url 必须是非空字符串，或直接省略')
+    let target: URL
+    try {
+      target = new URL(rawUrl)
+    } catch {
+      return fail('invalid_args', `url 不是合法的绝对地址：${rawUrl}`)
+    }
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+      return fail('invalid_args', `只支持 http 或 https 地址，收到 ${target.protocol}`)
+    }
+    url = target.href
+  }
+
+  if (args.active !== undefined && typeof args.active !== 'boolean') {
+    return fail('invalid_args', 'active 必须是布尔值')
+  }
+  const active = args.active !== false
+
+  let windowId: number | undefined
+  if (taskTabId !== undefined) {
+    try {
+      windowId = (await chrome.tabs.get(taskTabId)).windowId
+    } catch {
+      // 绑定页已关闭时退回当前窗口
+    }
+  }
+
+  let created: chrome.tabs.Tab
+  try {
+    created = await chrome.tabs.create({ windowId, url, active })
+  } catch (error) {
+    return fail('execution_failed', `新建标签页失败：${describeError(error)}`)
+  }
+
+  const createdId = created.id
+  if (createdId === undefined) return fail('execution_failed', '新标签页没有可用的 tabId')
+
+  if (url && args.wait_for_load !== false) {
+    const loaded = await waitForTabComplete(createdId, NAVIGATE_TIMEOUT_MS)
+    if (!loaded) {
+      return fail(
+        'timeout',
+        `新标签页在 ${Math.round(NAVIGATE_TIMEOUT_MS / 1000)} 秒内未完成加载，请用 wait_for_element 确认当前状态`,
+      )
+    }
+  }
+
+  let current = created
+  try {
+    current = await chrome.tabs.get(createdId)
+  } catch {
+    // 保持创建时返回的快照
+  }
+
+  return {
+    ok: true,
+    data: {
+      tabId: createdId,
+      url: current.url ?? current.pendingUrl ?? url ?? '',
+      title: current.title ?? '',
+      active,
+    },
+  }
+}
+
+/** 切换到同窗口的另一个标签页，后续页面工具在调用方重新绑定后作用于该页 */
+async function switchTab(
+  taskTabId: number | undefined,
+  args: Record<string, unknown>,
+): Promise<BrowserToolResponse<SwitchTabResult>> {
+  const tabId = args.tab_id
+  if (typeof tabId !== 'number' || !Number.isInteger(tabId) || tabId < 0) {
+    return fail('invalid_args', '缺少合法的 tab_id')
+  }
+
+  let target: chrome.tabs.Tab
+  try {
+    target = await chrome.tabs.get(tabId)
+  } catch (error) {
+    return fail('execution_failed', `标签页 #${tabId} 不存在或已关闭：${describeError(error)}`)
+  }
+
+  const taskTab = await resolveTaskTab(taskTabId)
+  if (taskTab && target.windowId !== taskTab.windowId) {
+    return fail('invalid_args', '只能切换到当前任务所在窗口的标签页')
+  }
+
+  try {
+    await chrome.tabs.update(tabId, { active: true })
+  } catch (error) {
+    return fail('execution_failed', `切换标签页失败：${describeError(error)}`)
+  }
+
+  try {
+    const updated = await chrome.tabs.get(tabId)
+    return {
+      ok: true,
+      data: {
+        tabId,
+        url: updated.url ?? updated.pendingUrl ?? '',
+        title: updated.title ?? '',
+      },
+    }
+  } catch (error) {
+    return fail('execution_failed', `读取标签页状态失败：${describeError(error)}`)
+  }
+}
+
+/**
+ * 关闭同窗口内的另一个标签页。
+ * 任务绑定页不允许关闭——侧边栏挂在该页上，关闭会中断任务；
+ * 窗口里最后一个标签页也不允许关闭，避免直接销毁用户窗口。
+ */
+async function closeTab(
+  taskTabId: number | undefined,
+  args: Record<string, unknown>,
+): Promise<BrowserToolResponse<CloseTabResult>> {
+  const tabId = args.tab_id
+  if (typeof tabId !== 'number' || !Number.isInteger(tabId) || tabId < 0) {
+    return fail('invalid_args', '缺少合法的 tab_id')
+  }
+
+  if (taskTabId !== undefined && tabId === taskTabId) {
+    return fail(
+      'invalid_args',
+      '不能关闭任务绑定页（会关闭侧边栏并中断任务），请先用 switch_tab 绑定其他标签页',
+    )
+  }
+
+  let target: chrome.tabs.Tab
+  try {
+    target = await chrome.tabs.get(tabId)
+  } catch (error) {
+    return fail('execution_failed', `标签页 #${tabId} 不存在或已关闭：${describeError(error)}`)
+  }
+
+  let taskTab: chrome.tabs.Tab | undefined
+  if (taskTabId !== undefined) {
+    try {
+      taskTab = await chrome.tabs.get(taskTabId)
+    } catch {
+      // 绑定页已关闭时不再限制窗口
+    }
+  }
+  if (taskTab && target.windowId !== taskTab.windowId) {
+    return fail('invalid_args', '只能关闭当前任务所在窗口的标签页')
+  }
+
+  let tabsInWindow: chrome.tabs.Tab[]
+  try {
+    tabsInWindow = await chrome.tabs.query({ windowId: target.windowId })
+  } catch (error) {
+    return fail('execution_failed', `读取窗口标签页失败：${describeError(error)}`)
+  }
+  if (tabsInWindow.length <= 1) {
+    return fail('invalid_args', '不能关闭窗口里的最后一个标签页')
+  }
+
+  try {
+    await chrome.tabs.remove(tabId)
+  } catch (error) {
+    return fail('execution_failed', `关闭标签页失败：${describeError(error)}`)
+  }
+
+  return { ok: true, data: { closedTabId: tabId } }
 }
 
 async function resolveTab(tabId: number | undefined): Promise<chrome.tabs.Tab> {

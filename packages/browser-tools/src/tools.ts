@@ -9,20 +9,19 @@ import type {
   BrowserToolResponse,
   BrowserToolTransport,
   ClickResult,
+  CloseTabResult,
   FillResult,
   FindElementsResult,
   NavigateResult,
   PageSnapshot,
   ScrollResult,
   SelectResult,
+  SwitchTabResult,
+  TabOpenResult,
+  TabsListResult,
   VerifyResult,
   WaitResult,
 } from './types'
-
-export interface BrowserToolsOptions {
-  /** 任务开始时绑定的标签页，避免执行过程中切页导致操作错目标 */
-  tabId?: number
-}
 
 const EMPTY_PARAMS: JsonSchema = {
   type: 'object',
@@ -30,12 +29,11 @@ const EMPTY_PARAMS: JsonSchema = {
   additionalProperties: false,
 }
 
-export function createBrowserTools(
-  transport: BrowserToolTransport,
-  options: BrowserToolsOptions = {},
-): AgentTool[] {
+export function createBrowserTools(transport: BrowserToolTransport): AgentTool[] {
+  // 任务绑定的标签页由传输层维护；标签页管理工具切换绑定后，后续调用自动跟随
   const send = <T>(action: BrowserAction, args: Record<string, unknown>) =>
-    transport.send<T>({ action, args, tabId: options.tabId })
+    transport.send<T>({ action, args })
+  const bindTab = (tabId: number | undefined) => transport.setTabId?.(tabId)
 
   return [
     {
@@ -236,6 +234,91 @@ export function createBrowserTools(
           response,
           (data) => `已打开「${data.title || '(无标题)'}」（${data.url}）`,
         )
+      },
+    },
+    {
+      name: 'list_tabs',
+      description:
+        'List the tabs in the same window as the task tab, with tabId, title, URL and which one is active. Call it before switch_tab or close_tab so you target a real tab instead of guessing.',
+      parameters: EMPTY_PARAMS,
+      readOnly: true,
+      async execute(): Promise<ToolResult> {
+        const response = await send<TabsListResult>('list_tabs', {})
+        return toResult(
+          response,
+          (data) =>
+            `当前窗口共 ${data.total} 个标签页${data.truncated ? `（仅返回前 ${data.tabs.length} 个）` : ''}`,
+        )
+      },
+    },
+    {
+      name: 'new_tab',
+      description:
+        'Open a new tab in the same window. Omit url to open a blank tab, or pass an absolute http(s) URL. With active=true (default) the task binding moves to the new tab, so later page tools act on it; with active=false the current binding is kept.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Absolute http:// or https:// URL (optional)' },
+          active: {
+            type: 'boolean',
+            description: 'Activate the new tab and bind the task to it (default true)',
+          },
+        },
+        additionalProperties: false,
+      },
+      requiresConfirmation: true,
+      async execute(args): Promise<ToolResult> {
+        const response = await send<TabOpenResult>('new_tab', args)
+        if (response.ok && response.data.active) bindTab(response.data.tabId)
+        return toResult(
+          response,
+          (data) =>
+            `已新建标签页「${data.title || '(无标题)'}」（${data.url || '空白页'}）${data.active ? '，任务已切换至该页' : '，任务仍绑定原标签页'}`,
+        )
+      },
+    },
+    {
+      name: 'switch_tab',
+      description:
+        'Switch the browser to another tab in the same window and bind the task to it, so later page tools act on that tab. Use list_tabs first to get the tabId. The target site still needs host permission; unapproved sites return not_authorized.',
+      parameters: {
+        type: 'object',
+        properties: {
+          tab_id: { type: 'integer', minimum: 0, description: 'tabId from list_tabs' },
+        },
+        required: ['tab_id'],
+        additionalProperties: false,
+      },
+      requiresConfirmation: true,
+      async execute(args): Promise<ToolResult> {
+        const response = await send<SwitchTabResult>('switch_tab', args)
+        if (response.ok) bindTab(response.data.tabId)
+        return toResult(
+          response,
+          (data) => `已切换到标签页「${data.title || '(无标题)'}」（${data.url}），后续操作都在该页执行`,
+        )
+      },
+    },
+    {
+      name: 'close_tab',
+      description:
+        'Close another tab in the same window by tabId from list_tabs. The task-bound tab cannot be closed because that would close the side panel and abort the task: switch_tab to another tab first, then close the old one. The last tab of a window cannot be closed either.',
+      parameters: {
+        type: 'object',
+        properties: {
+          tab_id: {
+            type: 'integer',
+            minimum: 0,
+            description: 'tabId from list_tabs; must not be the task-bound tab',
+          },
+        },
+        required: ['tab_id'],
+        additionalProperties: false,
+      },
+      requiresConfirmation: true,
+      async execute(args): Promise<ToolResult> {
+        const response = await send<CloseTabResult>('close_tab', args)
+        return toResult(response, (data) => `已关闭标签页 #${data.closedTabId}`)
       },
     },
     {

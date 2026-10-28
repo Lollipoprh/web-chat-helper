@@ -8,7 +8,13 @@ import type {
 } from 'browser-tools'
 import { BROWSER_ACTION_MESSAGE_TYPES } from './index'
 
-export function createBrowserTransport(tabId?: number): BrowserToolTransport {
+export function createBrowserTransport(
+  initialTabId?: number,
+  onTabChange?: (tabId: number | undefined) => void,
+): BrowserToolTransport {
+  // 任务绑定页可变：list/new/switch/close_tab 之后后续调用自动使用新绑定
+  let currentTabId = initialTabId
+
   return {
     async send<T>(request: BrowserToolRequest): Promise<BrowserToolResponse<T>> {
       const type = BROWSER_ACTION_MESSAGE_TYPES[request.action]
@@ -17,7 +23,7 @@ export function createBrowserTransport(tabId?: number): BrowserToolTransport {
           type,
           payload: {
             args: request.args,
-            tabId: request.tabId ?? tabId,
+            tabId: request.tabId ?? currentTabId,
           },
         })
         if (!isBrowserToolResponse(response)) {
@@ -36,6 +42,10 @@ export function createBrowserTransport(tabId?: number): BrowserToolTransport {
           },
         }
       }
+    },
+    setTabId(tabId: number | undefined): void {
+      currentTabId = tabId
+      onTabChange?.(tabId)
     },
   }
 }
