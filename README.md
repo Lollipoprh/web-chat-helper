@@ -11,9 +11,9 @@ The extension is a pure Manifest V3 Chrome extension — no backend, no local se
 - **Side Panel chat UI** — task input, streaming output, stop button, multiple persisted sessions (new / switch / delete) with task history.
 - **Provider settings page** — add / edit / delete / select providers (Base URL, API Key, Model, streaming and tool-call switches) plus a connection test.
 - **LLM client** — OpenAI-compatible Chat Completions, non-streaming and SSE streaming, multi-turn context, timeouts and cancellation.
-- **Agent loop** — tool-call parsing, argument validation, bounded rounds (10 by default), duplicate-call detection, execution logs.
-- **Browser tools** — read the active tab, page snapshot, element lookup, click, fill, scroll, wait and verify.
-- **Safety** — per-site host permissions, user confirmation for side-effecting actions, cancellation, interrupted-task marking.
+- **Agent loop** — tool-call parsing, argument validation, bounded rounds (50 by default), duplicate-call detection, execution logs.
+- **Browser tools** — 14 tools: page reading, element lookup, click, fill, scroll, wait, verify, navigation, select, plus tab management (list / new / switch / close).
+- **Safety** — full-site HTTPS access at load (`host_permissions`), on-demand access for local HTTP, user confirmation for side-effecting actions, cancellation, interrupted-task marking.
 
 Out of scope: Playwright/CDP automation, a standalone backend, MCP, multi-agent orchestration, long-term memory and full visual automation.
 

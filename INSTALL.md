@@ -80,7 +80,7 @@ Run each item below, check ✅ for pass, write a short note for fail. **Start wi
 | F1 | Invalid API key | Deliberately put the wrong key → Test connection | 401 → clear error hint | ☐ |
 | F2 | Wrong base URL | Set `https://example.com` | Test fails with "URL is not Chat Completions compatible" | ☐ |
 | F3 | Timeout | Disconnect network → send a task | Request times out, returns timeout error | ☐ |
-| F4 | Permission denied | Click **Reject** when the site-permission popup appears | Tools return `not_authorized`; red banner + one-click authorize button | ☐ |
+| F4 | Permission denied | Reject the popup for a local HTTP page (`http://localhost`) | Tools return `not_authorized` for that page; red banner + one-click authorize button | ☐ |
 | F5 | Missing element | Let the model look for something that doesn't exist | `element_not_found` → model should pivot | ☐ |
 | F6 | Duplicate-call guard | Let the model click the same element twice with identical args | Second call is skipped with `duplicate_call` | ☐ |
 | F7 | 402 quota exceeded | Test with an exhausted key | Chinese message: "account quota exceeded, recharge or switch API key" | ☐ |
@@ -122,16 +122,16 @@ When you hit a P0 issue, collect evidence in this order:
 ## 7. FAQ
 
 ### Q: Why does Chrome pop a permission prompt when I send a task?
-The extension uses **on-demand permissions**. It requests no host permission at install time — the first task against a site asks for `host_permissions` covering both your model provider URL and the current page URL. The Content Script is injected only after you grant the site.
+It normally doesn't. The extension declares `https://*/*` in `host_permissions`, so every HTTPS site is authorized as soon as the extension loads. The only prompt you may see is for a local HTTP dev server (`http://localhost/*` / `http://127.0.0.1/*`), which stays in `optional_host_permissions` and is requested on user gesture.
 
 ### Q: Why can't I operate a specific page?
 Three possibilities:
 1. **Protected page**: `chrome://`, `chrome-extension://`, `edge://`, and `view-source:` URLs don't allow extensions to inject scripts. Tool calls return `unsupported_page`.
-2. **Not authorized yet**: red banner "Current page is not authorized" → click **Authorize current site** or resend the task (which triggers the popup again).
+2. **Not authorized yet**: only pages outside the declared permissions can be blocked — for example a local HTTP server whose permission you rejected. Click **Authorize current site** or resend the task. Non-local HTTP sites are not supported at all.
 3. **Site CSP blocks the script**: a handful of sites (Google Search, Google Docs, etc.) block extension scripts via Content Security Policy. Switch to a regular page for testing.
 
 ### Q: Why isn't the Content Script auto-injected?
-The manifest uses the **never-matching** placeholder `web-chat-helper.invalid/*`. The Service Worker manually injects via `chrome.scripting.executeScript` after you grant the site. This guarantees no script is exposed to any page at install time.
+The manifest uses the **never-matching** placeholder `web-chat-helper.invalid/*`. The Service Worker manually injects via `chrome.scripting.executeScript` once the site is authorized (HTTPS sites are authorized at load). This guarantees no script is exposed to any page at install time.
 
 ### Q: Is my API key safe?
 - **Sent only from the Side Panel**: Content Script and Service Worker never hold the key.
@@ -139,4 +139,4 @@ The manifest uses the **never-matching** placeholder `web-chat-helper.invalid/*`
 - **Logs are redacted**: all tool arguments and request headers go through the redaction pipeline before being written to Console.
 
 ### Q: What is the current scope?
-The extension exposes 8 browser tools plus the agent loop, confirmation gate, cancellation and checkpoint. Future versions may add: long-running cross-tab tasks, visual understanding, more side-effect actions, multi-tab coordination, streaming tools for local Ollama.
+The extension exposes 14 browser tools plus the agent loop, confirmation gate, cancellation and checkpoint. Future versions may add: visual understanding, more side-effect actions, streaming tools for local Ollama.

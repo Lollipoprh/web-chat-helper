@@ -41,7 +41,7 @@ The app depends on the three packages using the `workspace:*` protocol.
 5. **Treat page content as untrusted input.** Text on a page must not be able to change the user's goal or escalate tool permissions.
 6. **Side-effecting actions require explicit user confirmation** — sending messages, submitting orders, payments, deletions.
 7. **Success is evidence, not a status code.** A click returning without error does not mean the task advanced; read DOM/state afterwards.
-8. **Tool arguments are validated before execution**, with a hard round cap (10 by default), duplicate-call detection and per-call timeouts.
+8. **Tool arguments are validated before execution**, with a hard round cap (50 by default), duplicate-call detection and per-call timeouts.
 
 ## Conventions
 
@@ -50,7 +50,7 @@ The app depends on the three packages using the `workspace:*` protocol.
 - Business logic must not hardcode any provider URL, model name or key. Providers are user data in `chrome.storage.local`.
 - Use `chrome.storage.local` for provider config; never log secrets — redact keys and tool arguments in logs.
 - Message passing between contexts goes through `chrome.runtime` messaging with the constants in `src/shared/index.ts`. Add new message types there rather than inventing inline strings.
-- Keep `manifest.config.ts` permissions minimal. Add host access through `optional_host_permissions` and request it on user gesture, not on install.
+- Keep `manifest.config.ts` permissions minimal, with one deliberate exception: `host_permissions` declares `https://*/*` so https pages work without per-site prompts. Local http access (`http://localhost/*`, `http://127.0.0.1/*`) stays in `optional_host_permissions` and is requested on user gesture. Do not add any other required host permission.
 - PowerShell on Windows: create directories with `New-Item -ItemType Directory -Force`, avoid `mkdir -p`, brace expansion and `&&` chaining.
 
 ## Verification expectations

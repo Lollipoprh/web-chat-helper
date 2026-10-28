@@ -6,15 +6,18 @@ export default defineManifest({
   manifest_version: 3,
   name: 'Web Chat Helper',
   description: '基于 OpenAI 兼容 API 的浏览器 AI 助手，可读取和操作当前网页',
-  version: '0.1.0',
+  version: '0.1.1',
 
   // 权限：sidePanel 侧边栏、storage 存储配置、tabs 标签页访问、scripting 注入脚本、activeTab 当前标签页
   permissions: ['sidePanel', 'storage', 'tabs', 'scripting', 'activeTab'],
 
-  // 可选主机权限：安装时一律不授予，只在用户主动操作时按站点申请
-  // - https://*/*        模型供应商与普通网页
+  // 全站 https 访问权限：加载扩展即授予，任务中不再逐个站点弹窗授权。
+  // 代价是 Chrome 会标注「可读取所有网站数据」；非本机 http 站点仍不在授权范围内。
+  host_permissions: ['https://*/*'],
+
+  // 可选主机权限：本机 http 地址不在必选权限内，仍在用户手势中按需申请
   // - http://localhost/* 等本机地址仅用于本地开发的兼容服务
-  optional_host_permissions: ['https://*/*', 'http://localhost/*', 'http://127.0.0.1/*'],
+  optional_host_permissions: ['http://localhost/*', 'http://127.0.0.1/*'],
 
   // Service Worker（后台脚本）
   background: {

@@ -1,6 +1,14 @@
 // 站点权限申请封装
-// 完整站点访问权限声明在 manifest 的 optional_host_permissions 中，
-// 安装时不授予，只在用户主动操作（点击按钮）时申请。
+// https 站点已由 manifest 的 host_permissions 全量授权；
+// 本机 http 地址声明在 optional_host_permissions 中，只在用户主动操作（点击按钮）时申请。
+
+/**
+ * 判断 match pattern 是否为 https 站点。
+ * 这类站点由必选 host_permissions 覆盖，无需再走权限申请流程。
+ */
+export function isHttpsOriginPattern(originPattern: string): boolean {
+  return originPattern.startsWith('https://')
+}
 
 /**
  * 由页面 URL 推导 match pattern。
@@ -19,7 +27,7 @@ export function originPatternFromUrl(url: string | null | undefined): string | n
 }
 
 /**
- * 只有 https 站点和本机 http 地址在 manifest 的 optional_host_permissions 中，
+ * 只有本机 http 地址仍声明在 optional_host_permissions 中，可以按需申请；
  * 其他 http 站点无法申请，也就不参与权限请求。
  */
 export function isRequestableOriginPattern(originPattern: string): boolean {

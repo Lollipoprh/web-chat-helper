@@ -80,7 +80,7 @@ pnpm build
 | F1 | 无效 API Key | 故意填错 Key → 测试连接 | 401 → 明确错误提示 | ☐ |
 | F2 | 错误 Base URL | 填 `https://example.com` | 连接测试失败，提示 URL 不兼容 | ☐ |
 | F3 | 超时 | 关掉网络 → 发送任务 | 请求超时后返回 timeout 错误 | ☐ |
-| F4 | 权限拒绝 | 弹出站点授权窗口时点「拒绝」 | 工具返回 not_authorized；侧边栏红色 banner + 一键授权按钮 | ☐ |
+| F4 | 权限拒绝 | 对本机 http 页面（`http://localhost`）的授权弹窗点「拒绝」 | 该页面的工具返回 not_authorized；侧边栏红色 banner + 一键授权按钮 | ☐ |
 | F5 | 元素缺失 | 让模型查找一个不存在的元素 | element_not_found → 模型收到后应换策略 | ☐ |
 | F6 | 重复调用拦截 | 让模型对同一元素点两次相同的 click_element | 第二次 duplicate_call 被跳过 | ☐ |
 | F7 | 402 额度不足 | 在账户耗尽的 Key 上测试 | 中文提示「账户额度不足，请检查供应商账户余额或配额，或更换 API Key」 | ☐ |
@@ -122,16 +122,16 @@ pnpm build
 ## 七、常见问题
 
 ### Q：为什么发送任务时 Chrome 弹出权限窗口？
-扩展使用**按需授权**模式：安装时不申请任何站点权限，第一次对某站点执行任务时，同时申请模型供应商 URL + 当前页面 URL 的 `host_permissions`。授权后才会向该页面注入 Content Script。
+通常不会。manifest 的 `host_permissions` 已声明 `https://*/*`，扩展一加载就拥有所有 https 站点的权限。唯一可能弹出的情况是本机 http 开发服务（`http://localhost/*` / `http://127.0.0.1/*`），它仍在 `optional_host_permissions` 中，在用户手势中按需申请。
 
 ### Q：为什么某个页面不能操作？
 三种原因：
 1. **受保护页面**：`chrome://`、`chrome-extension://`、`edge://`、`view-source:` 这些协议不允许扩展注入脚本，会返回 `unsupported_page`
-2. **未授权**：红色 banner 提示"当前页面尚未授权"→ 点「授权当前站点」或重新发送（会触发弹窗）
+2. **未授权**：只有声明范围之外的页面会被拦截，例如你拒绝了授权的本机 http 服务；点「授权当前站点」或重新发送即可。非本机 http 站点完全不支持
 3. **站点拒绝**：极少数网站（如 Google 搜索、Google Docs）的 CSP 或 Content Security Policy 阻断了扩展脚本，需换普通网页测试
 
 ### Q：Content Script 为什么不自动注入？
-manifest 里用了 `web-chat-helper.invalid/*` 这个**永不匹配**的占位域名。Service Worker 会在用户授权站点后，通过 `chrome.scripting.executeScript` 手动注入。这样安装时不会自动向任何站点暴露脚本。
+manifest 里用了 `web-chat-helper.invalid/*` 这个**永不匹配**的占位域名。Service Worker 会在站点被授权后，通过 `chrome.scripting.executeScript` 手动注入（https 站点在扩展加载时即已授权）。这样安装时不会自动向任何站点暴露脚本。
 
 ### Q：API Key 安全吗？
 - **只在侧边栏发送**：Content Script 和 Service Worker 都不持有 Key
@@ -139,4 +139,4 @@ manifest 里用了 `web-chat-helper.invalid/*` 这个**永不匹配**的占位�
 - **日志脱敏**：所有工具参数和请求头都会被脱敏后再写入 Console
 
 ### Q：当前范围？
-扩展对外暴露 8 个浏览器工具，配合 Agent Loop、确认机制、取消贯穿与检查点。后续可能增加：跨站长任务、视觉理解、更多副作用动作、多标签页联动、本地 Ollama 流式工具等。
+扩展对外暴露 14 个浏览器工具，配合 Agent Loop、确认机制、取消贯穿与检查点。后续可能增加：视觉理解、更多副作用动作、本地 Ollama 流式工具等。

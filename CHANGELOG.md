@@ -5,7 +5,19 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.1.1] - 2026-10-28
+
+### Added
+
+- **标签页管理工具** —— `list_tabs`、`new_tab`、`switch_tab`、`close_tab`，支持任务中列出、
+  新建、切换和关闭同窗口标签页。
+
+### Changed
+
+- **全站 https 授权** —— manifest 的 `host_permissions` 声明 `https://*/*`，扩展加载即授予所有
+  https 站点权限，任务中不再逐个站点弹窗；本机 http 地址（`http://localhost/*`、
+  `http://127.0.0.1/*`）仍在 `optional_host_permissions` 中按需申请。
+- **轮次上限** —— 默认最大工具轮次由 10 调整为 50。
 
 ## [0.1.0] - 2026-10-26
 
@@ -46,5 +58,6 @@
 
 - 首个版本，供应商配置结构、跨上下文消息协议与工具参数仍可能调整，升级前请留意后续变更说明。
 
-[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.0

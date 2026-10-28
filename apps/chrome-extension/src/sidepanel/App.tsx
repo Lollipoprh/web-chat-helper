@@ -51,6 +51,7 @@ import {
   type LogTaskStatus,
 } from '../shared/step-log-storage'
 import {
+  isHttpsOriginPattern,
   isRequestableOriginPattern,
   originPatternFromUrl,
   requestOriginPermissions,
@@ -411,13 +412,16 @@ export default function App() {
     let boundTabId = activeTabRef.current?.id
     const pagePattern = originPatternFromUrl(activeTabRef.current?.url)
 
-    // 权限申请必须紧贴用户手势，前面不能有 await；
-    // 一次请求同时覆盖模型服务与当前网页，已授权的地址不会弹窗
-    const granted = await requestOriginPermissions(
-      pagePattern
-        ? [endpoint.endpoint.originPattern, pagePattern]
-        : [endpoint.endpoint.originPattern],
-    )
+    // https 站点已由 manifest 的 host_permissions 全量授权，任务中途打开新站点也不再弹窗；
+    // 只有本机 http 地址仍需在用户手势中申请（其余 http 站点不在可选权限内）。
+    // 权限申请必须紧贴用户手势，前面不能有 await
+    const gesturePatterns: string[] = []
+    if (pagePattern && !isHttpsOriginPattern(pagePattern)) gesturePatterns.push(pagePattern)
+    if (!isHttpsOriginPattern(endpoint.endpoint.originPattern)) {
+      gesturePatterns.push(endpoint.endpoint.originPattern)
+    }
+    const granted =
+      gesturePatterns.length === 0 || (await requestOriginPermissions(gesturePatterns))
     let pageWarning: string | null = null
     if (!granted) {
       // 用户可能只拒绝了网页权限；模型服务已授权时仍允许继续（页面工具会返回 not_authorized）
