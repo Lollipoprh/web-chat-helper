@@ -22,6 +22,7 @@ import {
   type StopReason,
 } from 'agent-core'
 import { createBrowserTools } from 'browser-tools'
+import { createFileTools } from './file-tools'
 import {
   appendSessionMessage,
   clearSessionMessages,
@@ -67,6 +68,12 @@ import {
   saveSkipConfirm,
 } from '../shared/storage'
 import TaskHistory from './TaskHistory'
+import {
+  bindFile,
+  listBoundFiles,
+  unbindFile,
+  type BoundFileMeta,
+} from '../shared/file-handle-store'
 
 type MessageStatus = 'complete' | 'streaming' | 'error' | 'cancelled'
 
@@ -128,6 +135,10 @@ export default function App() {
   const [expandedToolEvents, setExpandedToolEvents] = useState<Set<string>>(
     () => new Set(),
   )
+  // 文件管理：已绑定的本地文件列表
+  const [boundFiles, setBoundFiles] = useState<BoundFileMeta[]>([])
+  // 是否展开文件管理面板
+  const [showFileManager, setShowFileManager] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -398,6 +409,53 @@ export default function App() {
     setSkipConfirm(next)
   }, [skipConfirm])
 
+  // 刷新已绑定文件列表
+  const refreshBoundFiles = useCallback(async () => {
+    try {
+      setBoundFiles(await listBoundFiles())
+    } catch (error) {
+      console.warn('[file] 读取已绑定文件列表失败', error)
+    }
+  }, [])
+
+  // 绑定新文件：弹出系统文件选择器，以文件名作为绑定键
+  const handleBindFile = useCallback(async () => {
+    try {
+      const record = await bindFile()
+      await refreshBoundFiles()
+      setBanner(`已绑定文件「${record.name}」`)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : '绑定文件失败'
+      // 用户取消文件选择器时不显示错误
+      if (message.includes('aborted') || message.includes('cancel')) return
+      setBanner(message)
+    }
+  }, [refreshBoundFiles])
+
+  // 解绑文件
+  const handleUnbindFile = useCallback(
+    async (name: string) => {
+      try {
+        await unbindFile(name)
+        await refreshBoundFiles()
+      } catch (error) {
+        console.warn('[file] 解绑文件失败', error)
+        setBanner('解绑文件失败，请重试')
+      }
+    },
+    [refreshBoundFiles],
+  )
+
+  // 展开文件管理面板时刷新列表
+  const toggleFileManager = useCallback(() => {
+    setShowFileManager((current) => {
+      const next = !current
+      if (next) void refreshBoundFiles()
+      return next
+    })
+  }, [refreshBoundFiles])
+
   async function handleSend() {
     const text = input.trim()
     if (!text || generating || !provider || !activeSessionId) return
@@ -557,11 +615,15 @@ export default function App() {
         })
         const registry = new ToolRegistry()
         const browserTools = createBrowserTools(transport)
+        const fileTools = createFileTools()
         // 只读工具在超限时会被优先淘汰，因此记录该标记供日志层使用
         const readOnlyNames = new Set(
-          browserTools.filter((tool) => tool.readOnly).map((tool) => tool.name),
+          [...browserTools, ...fileTools]
+            .filter((tool) => tool.readOnly)
+            .map((tool) => tool.name),
         )
         for (const tool of browserTools) registry.register(tool)
+        for (const tool of fileTools) registry.register(tool)
 
         const result = await runAgentLoop({
           chat: {
@@ -687,6 +749,8 @@ export default function App() {
       abortRef.current = null
       confirmResolverRef.current = null
       setPendingConfirmation(null)
+      // 任务可能写过绑定文件，结束后刷新文件列表的大小/修改时间
+      void refreshBoundFiles()
       // 任务正常结束（含取消/错误）后清除检查点；只有意外关闭 Side Panel 时会留下
       void clearAgentCheckpoint()
       // 助手回复结束后一次性落盘；取消与失败的内容也保留，便于回看
@@ -821,7 +885,87 @@ export default function App() {
         >
           {view === 'history' ? '返回对话' : '任务记录'}
         </button>
+        <button
+          onClick={toggleFileManager}
+          style={toolbarButtonStyle(false)}
+        >
+          {showFileManager ? '收起文件' : '文件管理'}
+        </button>
       </div>
+
+      {showFileManager && (
+        <div
+          style={{
+            padding: '10px 14px',
+            fontSize: 12,
+            lineHeight: 1.6,
+            background: '#f0f9ff',
+            color: '#0c4a6e',
+            borderBottom: '1px solid #bae6fd',
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>
+            本地文件管理（供模型读写）
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <button
+              onClick={() => void handleBindFile()}
+              style={{
+                padding: '4px 10px',
+                fontSize: 12,
+                cursor: 'pointer',
+                background: '#0284c7',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 4,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              绑定文件
+            </button>
+          </div>
+          {boundFiles.length === 0 ? (
+            <div style={{ color: '#64748b', fontSize: 11 }}>
+              尚未绑定文件。绑定后模型可通过文件名读取和写入该文件。
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {boundFiles.map((file) => (
+                <div
+                  key={file.name}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 6px',
+                    background: '#fff',
+                    border: '1px solid #e0f2fe',
+                    borderRadius: 4,
+                  }}
+                >
+                  <span style={{ color: '#0369a1', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {file.name}（{formatFileSize(file.size)}）
+                  </span>
+                  <button
+                    onClick={() => void handleUnbindFile(file.name)}
+                    style={{
+                      padding: '2px 6px',
+                      fontSize: 11,
+                      cursor: 'pointer',
+                      background: 'transparent',
+                      color: '#dc2626',
+                      border: '1px solid #fecaca',
+                      borderRadius: 3,
+                    }}
+                  >
+                    解绑
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {banner && (
         <div
@@ -1270,6 +1414,12 @@ function toolbarButtonStyle(disabled: boolean): CSSProperties {
 function describeError(error: unknown): string {
   if (error instanceof LLMError) return error.message
   return error instanceof Error ? error.message : String(error)
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function toUiMessage(record: SessionMessageRecord): UiMessage {
