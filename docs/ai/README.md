@@ -1,29 +1,28 @@
-# AI 索引（docs/ai）
+# AI Code Index
 
-给 AI agent 用的按需索引。`AGENTS.md` 只放指针，详细内容在这里。
+An on-demand code index for AI agents. `AGENTS.md` contains the entry points; the details live here.
 
-## 读取顺序
+## Reading order
 
-1. 业务需求 → `features.md`（业务词 → 文件）
-2. 中文词对不上代码 → `glossary.md`
-3. 需要符号、行号或引用关系 → `codemap/<单元>.md`
-4. 架构决策 → `docs/adr/`（尚未建立时不读）
+1. Feature request: use `features.md` to find the relevant files.
+2. Product wording does not match a code identifier: use `glossary.md`.
+3. Symbols, line numbers, or references: use the relevant file in `codemap/`.
+4. Architectural decisions: check `docs/adr/` if it exists.
 
-拿到 `路径:行号` 后只读取对应代码段，不要整读热文件。
+Once you have a path and line number, read only that section of the source file. Avoid reading large files in full.
 
-## 行数预算
+## Line budget
 
-`AGENTS.md` ≤130 行，`features.md` ≤150 行，codemap 单片 ≤200 行，总计 ≤900 行。
-冷启动目标是 `AGENTS.md`、`features.md` 加两个相关源文件约 400 行。
+Keep `AGENTS.md` at 130 lines or fewer, `features.md` at 150 lines or fewer, each codemap file at 200 lines or fewer, and all codemap files at 900 lines or fewer.
+A cold start should need roughly 400 lines across `AGENTS.md`, `features.md`, and two relevant source sections.
 
-## 手工与生成
+## Handwritten and generated files
 
-- 手工维护：`README.md`、`features.md`、`glossary.md`
-- 自动生成，禁止手改：`codemap/**`
-- 重新生成：`pnpm map`
-- 一致性校验：`pnpm map:check`
-- 路径指针校验：`pnpm docs:check`
+- Maintain `README.md`, `features.md`, and `glossary.md` by hand.
+- Generate `codemap/` with `pnpm map`; do not edit its files manually.
+- Check generated content with `pnpm map:check`.
+- Check file references with `pnpm docs:check`.
 
-## 维护规则
+## Maintenance
 
-改动涉及新业务概念或模块职责变化时，更新 `features.md`；中文业务词变化时同步更新 `glossary.md`。`pnpm verify` 全绿才算完成。
+Update `features.md` when a change adds a product concept or changes a module's responsibility. Update `glossary.md` when product wording changes. Run `pnpm verify` before finishing.
