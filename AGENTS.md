@@ -37,7 +37,7 @@ The app depends on the three packages using the `workspace:*` protocol.
 Do not explore with recursive listings or bulk reads. Read indexes on demand:
 
 1. Business feature → read `docs/ai/features.md`, jump to the listed files only.
-2. Chinese wording does not match an identifier → read `docs/ai/glossary.md`.
+2. Product wording does not match an identifier → read `docs/ai/glossary.md`.
 3. Need symbols, line numbers or "who uses this" → grep `docs/ai/codemap/` directly
    (faster and lower-noise than grepping the whole repo), then read just that section
    with the `read` tool's offset/limit.
