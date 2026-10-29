@@ -7,13 +7,18 @@
     "build": "pnpm -r --filter ./apps/** run build",
     "dev": "pnpm --filter chrome-extension run dev",
     "typecheck": "pnpm -r run typecheck",
-    "test": "vitest run"
+    "test": "vitest run",
+    "map": "node scripts/gen-codemap.mjs",
+    "map:check": "node scripts/gen-codemap.mjs --check",
+    "docs:check": "node scripts/check-docs.mjs",
+    "verify": "pnpm typecheck && pnpm test && pnpm map:check && pnpm docs:check"
   },
   "engines": {
     "node": ">=18"
   },
   "packageManager": "pnpm@12.14.0",
   "devDependencies": {
+    "typescript": "^5.7.0",
     "vitest": "^5.0.5"
   }
 }

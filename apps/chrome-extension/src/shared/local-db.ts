@@ -3,12 +3,13 @@
 // 所有模块必须经由这里打开数据库，避免各自使用不同版本号导致升级冲突。
 
 export const LOCAL_DB_NAME = 'web-chat-helper'
-export const LOCAL_DB_VERSION = 2
+export const LOCAL_DB_VERSION = 4
 
 export const TASK_STORE = 'tasks'
 export const STEP_STORE = 'steps'
 export const SESSION_STORE = 'sessions'
 export const MESSAGE_STORE = 'sessionMessages'
+export const FILE_HANDLE_STORE = 'fileHandles'
 
 export const TASK_CREATED_INDEX = 'by_createdAt'
 export const TASK_SESSION_INDEX = 'by_sessionId'
@@ -23,8 +24,9 @@ export function openLocalDb(): Promise<IDBDatabase> {
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(LOCAL_DB_NAME, LOCAL_DB_VERSION)
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result
+      const oldVersion = event.oldVersion
 
       if (!db.objectStoreNames.contains(TASK_STORE)) {
         const store = db.createObjectStore(TASK_STORE, { keyPath: 'taskId' })
@@ -47,6 +49,15 @@ export function openLocalDb(): Promise<IDBDatabase> {
       const taskStore = request.transaction?.objectStore(TASK_STORE)
       if (taskStore && !taskStore.indexNames.contains(TASK_SESSION_INDEX)) {
         taskStore.createIndex(TASK_SESSION_INDEX, 'sessionId')
+      }
+
+      // v2 -> v4：文件句柄存储以文件名为主键（v3 曾用 alias 别名，后移除别名机制，删除重建）
+      // 仅在跨过 v4 时重建，避免后续任意一次升级都清空用户的文件绑定
+      if (oldVersion < 4) {
+        if (db.objectStoreNames.contains(FILE_HANDLE_STORE)) {
+          db.deleteObjectStore(FILE_HANDLE_STORE)
+        }
+        db.createObjectStore(FILE_HANDLE_STORE, { keyPath: 'name' })
       }
     }
 
