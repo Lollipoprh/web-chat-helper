@@ -9,7 +9,8 @@ export default defineManifest({
   version: '0.1.1',
 
   // 权限：sidePanel 侧边栏、storage 存储配置、tabs 标签页访问、scripting 注入脚本、activeTab 当前标签页
-  permissions: ['sidePanel', 'storage', 'tabs', 'scripting', 'activeTab'],
+  // downloads：供 download_file 工具把模型产出的文本另存到系统下载目录（无需用户绑定文件）
+  permissions: ['sidePanel', 'storage', 'tabs', 'scripting', 'activeTab', 'downloads'],
 
   // 全站 https 访问权限：加载扩展即授予，任务中不再逐个站点弹窗授权。
   // 代价是 Chrome 会标注「可读取所有网站数据」；非本机 http 站点仍不在授权范围内。

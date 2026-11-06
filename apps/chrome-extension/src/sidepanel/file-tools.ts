@@ -117,6 +117,55 @@ function isResolved(
   return 'file' in result
 }
 
+/**
+ * 清洗下载文件名：
+ * - 统一用正斜杠，允许子目录（如 notes/todo.md）
+ * - 拒绝绝对路径、盘符和 .. 目录穿越，避免写到下载目录之外
+ * - 替换 Windows 非法字符，去掉结尾的点和空格
+ * 返回 null 表示该文件名不可用。
+ */
+function sanitizeDownloadName(raw: string): string | null {
+  const normalized = raw.trim().replace(/\\/g, '/')
+  if (!normalized) return null
+  if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) return null
+
+  const segments = normalized.split('/').filter((segment) => segment.length > 0)
+  if (segments.length === 0) return null
+  if (segments.some((segment) => segment === '..' || segment === '.')) return null
+
+  const cleaned = segments.map((segment) => {
+    const safe = segment.replace(/[<>:"|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/, '')
+    return safe || '_'
+  })
+  return cleaned.join('/')
+}
+
+/** 把文本编码成 data URL；用 data URL 而不是 blob URL，避免下载期间 object URL 被回收 */
+function textToDataUrl(text: string): string {
+  const bytes = new TextEncoder().encode(text)
+  let binary = ''
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index])
+  }
+  return `data:text/plain;charset=utf-8;base64,${btoa(binary)}`
+}
+
+/** 通过 chrome.downloads 写文件，无需用户手势 */
+function startDownload(url: string, filename: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    chrome.downloads.download(
+      { url, filename, conflictAction: 'overwrite', saveAs: false },
+      (downloadId) => {
+        if (chrome.runtime.lastError || typeof downloadId !== 'number') {
+          reject(new Error(chrome.runtime.lastError?.message ?? '下载任务创建失败'))
+          return
+        }
+        resolve(downloadId)
+      },
+    )
+  })
+}
+
 /** 创建文件读写工具集合，在 Side Panel 的 agent loop 中注册 */
 export function createFileTools(): AgentTool[] {
   return [
@@ -132,7 +181,8 @@ export function createFileTools(): AgentTool[] {
           return {
             ok: true,
             data: [],
-            message: '当前没有绑定任何本地文件。请用户在侧边栏「文件管理」中绑定文件后再试。',
+            message:
+              '当前没有绑定任何本地文件。如需新建文件，可直接调用 download_file 保存到系统下载目录。',
           }
         }
         return {
@@ -232,6 +282,55 @@ export function createFileTools(): AgentTool[] {
           ok: true,
           data: { name: file.name, bytesWritten: content.length, mode },
           message: `已${mode === 'append' ? '追加' : '覆盖'}写入文件「${file.name}」，共 ${content.length} 字节`,
+        }
+      },
+    },
+    {
+      name: 'download_file',
+      description:
+        'Save text content as a new file into the browser Downloads folder, without requiring the user to bind a file. Use this when the user wants a new file written and no bound file fits. filename is relative to the Downloads folder and may include a subdirectory, for example "notes/todo.md"; absolute paths and ".." are rejected. An existing file with the same name is overwritten. This is a side-effecting action that requires user confirmation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          filename: {
+            type: 'string',
+            description:
+              'File name relative to the Downloads folder, e.g. "report.md" or "notes/todo.md". No absolute paths, no "..".',
+          },
+          content: {
+            type: 'string',
+            description: 'Text content to write into the file',
+          },
+        },
+        required: ['filename', 'content'],
+        additionalProperties: false,
+      },
+      requiresConfirmation: true,
+      async execute(args): Promise<ToolResult> {
+        const content = String(args.content ?? '')
+        const safeName = sanitizeDownloadName(String(args.filename ?? ''))
+        if (!safeName) {
+          return {
+            ok: false,
+            code: 'invalid_args',
+            message:
+              '文件名无效：不能为空、不能是绝对路径、不能包含 ..；如需子目录请用正斜杠分隔（如 notes/todo.md）',
+          }
+        }
+
+        try {
+          const downloadId = await startDownload(textToDataUrl(content), safeName)
+          return {
+            ok: true,
+            data: { downloadId, filename: safeName, bytesWritten: content.length },
+            message: `已开始保存到下载目录：${safeName}（${content.length} 字节）`,
+          }
+        } catch (error) {
+          return {
+            ok: false,
+            code: 'execution_failed',
+            message: `保存文件失败：${error instanceof Error ? error.message : String(error)}`,
+          }
         }
       },
     },
