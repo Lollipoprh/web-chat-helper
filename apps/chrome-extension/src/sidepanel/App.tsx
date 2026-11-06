@@ -3,7 +3,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
   type KeyboardEvent,
 } from 'react'
 import {
@@ -68,14 +67,15 @@ import {
   saveSkipConfirm,
 } from '../shared/storage'
 import TaskHistory from './TaskHistory'
+import { MessageBubble, type MessageStatus } from './components/MessageBubble'
+import { ToolEventItem } from './components/ToolEventItem'
+import { Alert, Button, Checkbox, Select, TextArea, color, fontSize, radius, space } from '../ui'
 import {
   bindFile,
   listBoundFiles,
   unbindFile,
   type BoundFileMeta,
 } from '../shared/file-handle-store'
-
-type MessageStatus = 'complete' | 'streaming' | 'error' | 'cancelled'
 
 /**
  * System prompt (English) —— concise, scope-locked.
@@ -791,7 +791,7 @@ export default function App() {
       <header
         style={{
           padding: '10px 14px',
-          borderBottom: '1px solid #e5e5e5',
+          borderBottom: `1px solid ${color.border}`,
           display: 'flex',
           alignItems: 'center',
           gap: 8,
@@ -802,7 +802,7 @@ export default function App() {
           <div
             style={{
               fontSize: 11,
-              color: '#9ca3af',
+              color: color.textFaint,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -811,315 +811,226 @@ export default function App() {
             {provider ? `${provider.name} · ${provider.model}` : '未配置供应商'}
           </div>
         </div>
-        <button
-          onClick={openOptions}
-          style={{
-            padding: '3px 8px',
-            fontSize: 12,
-            cursor: 'pointer',
-            background: 'transparent',
-            border: '1px solid #d4d4d4',
-            borderRadius: 4,
-          }}
-        >
+        <Button variant="secondary" size="sm" onClick={openOptions}>
           设置
-        </button>
+        </Button>
       </header>
 
       <div
         style={{
           padding: '8px 14px',
-          borderBottom: '1px solid #e5e5e5',
+          borderBottom: `1px solid ${color.border}`,
           display: 'flex',
           alignItems: 'center',
           gap: 6,
           flexWrap: 'wrap',
         }}
       >
-        <select
+        <Select
           value={activeSessionId ?? ''}
           onChange={(event) => void handleSwitchSession(event.target.value)}
           disabled={generating || !historyLoaded || sessions.length === 0}
           title="切换会话"
-          style={{
-            flex: '1 1 120px',
-            minWidth: 0,
-            fontSize: 12,
-            padding: '3px 4px',
-            border: '1px solid #d4d4d4',
-            borderRadius: 4,
-            background: '#fff',
-          }}
-        >
-          {sessions.map((session) => (
-            <option key={session.sessionId} value={session.sessionId}>
-              {session.title}（{session.messageCount}）
-            </option>
-          ))}
-        </select>
-        <button
+          size="sm"
+          block={false}
+          options={sessions.map((session) => ({
+            value: session.sessionId,
+            label: `${session.title}（${session.messageCount}）`,
+          }))}
+          style={{ flex: '1 1 120px', minWidth: 0 }}
+        />
+        <Button
+          size="sm"
           onClick={() => void handleNewSession()}
           disabled={generating}
-          style={toolbarButtonStyle(generating)}
         >
           新建
-        </button>
-        <button
+        </Button>
+        <Button
+          size="sm"
           onClick={() => void handleDeleteSession()}
           disabled={generating || !activeSessionId}
-          style={toolbarButtonStyle(generating || !activeSessionId)}
         >
           删除
-        </button>
-        <button
+        </Button>
+        <Button
+          size="sm"
           onClick={handleClear}
           disabled={generating || !activeSessionId}
-          style={toolbarButtonStyle(generating || !activeSessionId)}
         >
           清空
-        </button>
-        <button
+        </Button>
+        <Button
+          size="sm"
           onClick={() => setView((current) => (current === 'history' ? 'chat' : 'history'))}
           disabled={!activeSessionId}
-          style={toolbarButtonStyle(!activeSessionId)}
         >
           {view === 'history' ? '返回对话' : '任务记录'}
-        </button>
-        <button
-          onClick={toggleFileManager}
-          style={toolbarButtonStyle(false)}
-        >
+        </Button>
+        <Button size="sm" onClick={toggleFileManager}>
           {showFileManager ? '收起文件' : '文件管理'}
-        </button>
+        </Button>
       </div>
 
       {showFileManager && (
-        <div
-          style={{
-            padding: '10px 14px',
-            fontSize: 12,
-            lineHeight: 1.6,
-            background: '#f0f9ff',
-            color: '#0c4a6e',
-            borderBottom: '1px solid #bae6fd',
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>
+        <Alert tone="info" flush style={{ padding: '10px 14px' }}>
+          <div style={{ fontWeight: 600, marginBottom: space.md }}>
             本地文件管理（供模型读写）
           </div>
-          <div style={{ marginBottom: 8 }}>
-            <button
-              onClick={() => void handleBindFile()}
-              style={{
-                padding: '4px 10px',
-                fontSize: 12,
-                cursor: 'pointer',
-                background: '#0284c7',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 4,
-                whiteSpace: 'nowrap',
-              }}
-            >
+          <div style={{ marginBottom: space.md }}>
+            <Button variant="primary" size="sm" onClick={() => void handleBindFile()}>
               绑定文件
-            </button>
+            </Button>
           </div>
           {boundFiles.length === 0 ? (
-            <div style={{ color: '#64748b', fontSize: 11 }}>
+            <div style={{ color: color.textMuted, fontSize: fontSize.xs }}>
               尚未绑定文件。绑定后模型可通过文件名读取和写入该文件。
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: space.xs }}>
               {boundFiles.map((file) => (
                 <div
                   key={file.name}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 6,
+                    gap: space.sm,
                     padding: '4px 6px',
-                    background: '#fff',
-                    border: '1px solid #e0f2fe',
-                    borderRadius: 4,
+                    background: color.surface,
+                    border: `1px solid ${color.infoBorder}`,
+                    borderRadius: radius.sm,
                   }}
                 >
-                  <span style={{ color: '#0369a1', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {file.name}（{formatFileSize(file.size)}）
-                  </span>
-                  <button
-                    onClick={() => void handleUnbindFile(file.name)}
+                  <span
                     style={{
-                      padding: '2px 6px',
-                      fontSize: 11,
-                      cursor: 'pointer',
-                      background: 'transparent',
-                      color: '#dc2626',
-                      border: '1px solid #fecaca',
-                      borderRadius: 3,
+                      color: color.infoText,
+                      flex: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
                     }}
                   >
+                    {file.name}（{formatFileSize(file.size)}）
+                  </span>
+                  <Button
+                    variant="danger"
+                    size="xs"
+                    onClick={() => void handleUnbindFile(file.name)}
+                  >
                     解绑
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </Alert>
       )}
 
       {banner && (
-        <div
-          style={{
-            padding: '8px 14px',
-            fontSize: 12,
-            lineHeight: 1.6,
-            background: '#fef2f2',
-            color: '#b91c1c',
-            borderBottom: '1px solid #fecaca',
-            wordBreak: 'break-word',
-          }}
-        >
+        <Alert tone="error" flush style={{ padding: '8px 14px' }}>
           {banner}
           {pendingPageOrigin && (
-            <div style={{ marginTop: 6 }}>
-              <button
-                onClick={() => void handleGrantPagePermission()}
+            <div style={{ marginTop: space.sm }}>
+              <Button
+                size="sm"
                 style={{
-                  padding: '4px 10px',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                  background: '#b91c1c',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 4,
+                  background: color.danger,
+                  color: color.textInverse,
+                  borderColor: 'transparent',
                 }}
+                onClick={() => void handleGrantPagePermission()}
               >
                 授权当前站点
-              </button>
+              </Button>
             </div>
           )}
-        </div>
+        </Alert>
       )}
 
       {interruptedCheckpoint && !generating && (
-        <div
+        <Alert
+          tone="warning"
+          flush
           style={{
             padding: '8px 14px',
-            fontSize: 12,
-            lineHeight: 1.6,
-            background: '#fffbeb',
-            color: '#92400e',
-            borderBottom: '1px solid #fde68a',
             display: 'flex',
             alignItems: 'center',
             gap: 10,
           }}
         >
-          上次任务已中断（第 {interruptedCheckpoint.rounds} 轮）。为避免重放副作用步骤，恢复前请重新发送，不自动执行旧动作。
-          <button
-            onClick={() => void handleDismissInterrupted()}
+          <span style={{ flex: 1 }}>
+            上次任务已中断（第 {interruptedCheckpoint.rounds} 轮）。为避免重放副作用步骤，恢复前请重新发送，不自动执行旧动作。
+          </span>
+          <Button
+            size="sm"
             style={{
-              padding: '3px 8px',
-              fontSize: 12,
-              cursor: 'pointer',
-              background: '#f59e0b',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 4,
-              marginLeft: 'auto',
+              background: color.warning,
+              color: color.textInverse,
+              borderColor: 'transparent',
             }}
+            onClick={() => void handleDismissInterrupted()}
           >
             清除
-          </button>
-        </div>
+          </Button>
+        </Alert>
       )}
 
       {pendingConfirmation && (
-        <div
-          style={{
-            padding: '10px 14px',
-            fontSize: 12,
-            lineHeight: 1.6,
-            background: '#fff7ed',
-            color: '#9a3412',
-            borderBottom: '1px solid #fed7aa',
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+        <Alert tone="warning" flush style={{ padding: '10px 14px' }}>
+          <div style={{ fontWeight: 600, marginBottom: space.sm }}>
             等待确认：<span style={{ fontFamily: 'monospace' }}>{pendingConfirmation.toolName}</span>
           </div>
           <div
             style={{
-              background: '#fff',
-              border: '1px solid #fed7aa',
+              background: color.surface,
+              border: `1px solid ${color.warningBorder}`,
               borderRadius: 4,
               padding: '6px 8px',
-              marginBottom: 8,
+              marginBottom: space.md,
               wordBreak: 'break-all',
-              color: '#6b7280',
+              color: color.textMuted,
             }}
           >
             {pendingConfirmation.argsPreview}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={handleConfirmAction}
+          <div style={{ display: 'flex', gap: space.md }}>
+            <Button
+              size="sm"
               style={{
-                padding: '5px 12px',
-                fontSize: 12,
-                cursor: 'pointer',
-                background: '#16a34a',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 4,
+                background: color.success,
+                color: color.textInverse,
+                borderColor: 'transparent',
               }}
+              onClick={handleConfirmAction}
             >
               确认执行
-            </button>
-            <button
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              style={{ color: color.warningText, borderColor: color.warningBorder }}
               onClick={handleDenyAction}
-              style={{
-                padding: '5px 12px',
-                fontSize: 12,
-                cursor: 'pointer',
-                background: '#fff',
-                color: '#9a3412',
-                border: '1px solid #fdba74',
-                borderRadius: 4,
-              }}
             >
               拒绝
-            </button>
+            </Button>
           </div>
-        </div>
+        </Alert>
       )}
 
       <main style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
         {view === 'history' && activeSessionId ? (
           <TaskHistory sessionId={activeSessionId} />
         ) : loading ? (
-          <p style={{ color: '#9ca3af', fontSize: 12 }}>加载中…</p>
+          <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>加载中…</p>
         ) : !provider ? (
-          <div style={{ textAlign: 'center', color: '#4b5563', marginTop: 40 }}>
+          <div style={{ textAlign: 'center', color: color.textSecondary, marginTop: 40 }}>
             <p style={{ margin: 0 }}>尚未配置模型供应商</p>
-            <button
-              onClick={openOptions}
-              style={{
-                marginTop: 12,
-                padding: '7px 14px',
-                fontSize: 13,
-                cursor: 'pointer',
-                background: '#2563eb',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 6,
-              }}
-            >
+            <Button variant="primary" style={{ marginTop: space.lg }} onClick={openOptions}>
               前往设置
-            </button>
+            </Button>
           </div>
         ) : messages.length === 0 ? (
-          <p style={{ color: '#9ca3af', fontSize: 12 }}>输入问题开始对话。</p>
+          <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>输入问题开始对话。</p>
         ) : (
           messages.map((message) => (
             <div
@@ -1131,7 +1042,7 @@ export default function App() {
                 marginBottom: 10,
               }}
             >
-              {/* 工具调用事件：默认收起显示 name / 状态 / 耗时，点击展开 args 与 summary，
+              {/* 工具调用事件：默认收起显示名称/状态/耗时，点击展开参数与摘要，
                   且排在回复文本之前 —— 用户先看到模型做了什么，再看到最终答复 */}
               {message.role === 'assistant' &&
                 message.toolEvents &&
@@ -1146,163 +1057,23 @@ export default function App() {
                       gap: 4,
                     }}
                   >
-                    {message.toolEvents.map((event) => {
-                      const expanded = expandedToolEvents.has(event.id)
-                      const statusColor =
-                        event.status === 'error'
-                          ? '#b91c1c'
-                          : event.status === 'awaiting_confirmation'
-                            ? '#d97706'
-                            : event.status === 'running'
-                              ? '#9ca3af'
-                              : '#047857'
-                      const statusText =
-                        event.status === 'awaiting_confirmation'
-                          ? '等待确认'
-                          : event.status === 'running'
-                            ? '执行中'
-                            : event.status === 'success'
-                              ? '成功'
-                              : '失败'
-                      return (
-                        <div
-                          key={event.id}
-                          style={{
-                            fontSize: 11,
-                            color: '#4b5563',
-                            background: '#f9fafb',
-                            border: '1px solid #e5e7eb',
-                            borderRadius: 6,
-                          }}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => toggleToolEvent(event.id)}
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              padding: '6px 10px',
-                              border: 'none',
-                              borderRadius: 6,
-                              cursor: 'pointer',
-                              background: 'transparent',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              fontFamily: 'inherit',
-                              color: 'inherit',
-                              fontSize: 'inherit',
-                            }}
-                          >
-                            <span style={{ color: '#9ca3af' }}>
-                              {expanded ? '▾' : '▸'}
-                            </span>
-                            <span style={{ fontFamily: 'monospace' }}>
-                              {event.name}
-                            </span>
-                            <span
-                              style={{
-                                color: statusColor,
-                                fontWeight: 500,
-                              }}
-                            >
-                              {statusText}
-                            </span>
-                            {typeof event.durationMs === 'number' && (
-                              <span style={{ color: '#9ca3af' }}>
-                                {event.durationMs}ms
-                              </span>
-                            )}
-                          </button>
-                          {expanded && (
-                            <div
-                              style={{
-                                padding: '0 10px 8px 26px',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: 4,
-                              }}
-                            >
-                              {event.argsPreview && (
-                                <div
-                                  style={{
-                                    color: '#6b7280',
-                                    wordBreak: 'break-all',
-                                    fontSize: 11,
-                                  }}
-                                >
-                                  {event.argsPreview}
-                                </div>
-                              )}
-                              {event.summary && (
-                                <div
-                                  style={{
-                                    color:
-                                      event.status === 'error' ? '#b91c1c' : '#374151',
-                                    fontSize: 11,
-                                    lineHeight: 1.55,
-                                  }}
-                                >
-                                  {event.summary}
-                                </div>
-                              )}
-                              {event.errorCode && (
-                                <div
-                                  style={{
-                                    color: '#b91c1c',
-                                    fontSize: 11,
-                                  }}
-                                >
-                                  错误码：{event.errorCode}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
+                    {message.toolEvents.map((event) => (
+                      <ToolEventItem
+                        key={event.id}
+                        event={event}
+                        expanded={expandedToolEvents.has(event.id)}
+                        onToggle={() => toggleToolEvent(event.id)}
+                      />
+                    ))}
                   </div>
                 )}
 
-              <div
-                style={{
-                  maxWidth: '88%',
-                  padding: '8px 11px',
-                  borderRadius: 8,
-                  fontSize: 13,
-                  lineHeight: 1.65,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  background:
-                    message.role === 'user'
-                      ? '#2563eb'
-                      : message.status === 'error'
-                        ? '#fef2f2'
-                        : '#f3f4f6',
-                  color: message.role === 'user' ? '#fff' : '#111827',
-                  border:
-                    message.role === 'assistant' && message.status === 'error'
-                      ? '1px solid #fecaca'
-                      : 'none',
-                }}
-              >
-                {message.content}
-                {message.status === 'streaming' &&
-                  (message.content ? (
-                    <span style={{ color: '#9ca3af' }}> ▍</span>
-                  ) : (
-                    <span style={{ color: '#9ca3af' }}>正在生成…</span>
-                  ))}
-                {message.status === 'cancelled' && (
-                  <span style={{ color: '#9ca3af', fontSize: 11 }}>（已取消）</span>
-                )}
-                {message.status === 'error' && (
-                  <span style={{ color: '#b91c1c', fontSize: 11 }}>
-                    {message.content ? ' ' : ''}
-                    {message.error ?? '生成失败'}
-                  </span>
-                )}
-              </div>
+              <MessageBubble
+                role={message.role}
+                content={message.content}
+                status={message.status}
+                error={message.error}
+              />
             </div>
           ))
         )}
@@ -1310,105 +1081,58 @@ export default function App() {
       </main>
 
       {view === 'chat' && (
-        <footer style={{ padding: 10, borderTop: '1px solid #e5e5e5' }}>
-          <textarea
+        <footer style={{ padding: 10, borderTop: `1px solid ${color.border}` }}>
+          <TextArea
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={provider ? '输入问题，Enter 发送，Shift+Enter 换行' : '请先配置供应商'}
             disabled={!provider || loading}
             rows={3}
-            style={{
-              width: '100%',
-              padding: 8,
-              fontSize: 13,
-              resize: 'none',
-              border: '1px solid #d4d4d4',
-              borderRadius: 6,
-              boxSizing: 'border-box',
-              background: provider ? '#fff' : '#fafafa',
-              fontFamily: 'inherit',
-            }}
+            style={{ background: provider ? color.surface : color.surfaceMuted }}
           />
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <div style={{ display: 'flex', gap: space.md, marginTop: space.md }}>
           {generating ? (
-            <button
-              onClick={handleStop}
-              style={{
-                padding: '6px 14px',
-                fontSize: 13,
-                cursor: 'pointer',
-                background: '#fff',
-                color: '#b91c1c',
-                border: '1px solid #fecaca',
-                borderRadius: 6,
-              }}
-            >
+            <Button variant="danger" onClick={handleStop}>
               停止
-            </button>
+            </Button>
           ) : (
-            <button
-              onClick={() => void handleSend()}
-              disabled={!canSend}
-              style={{
-                padding: '6px 14px',
-                fontSize: 13,
-                cursor: canSend ? 'pointer' : 'not-allowed',
-                background: canSend ? '#2563eb' : '#e5e5e5',
-                color: canSend ? '#fff' : '#9ca3af',
-                border: 'none',
-                borderRadius: 6,
-              }}
-            >
+            <Button variant="primary" disabled={!canSend} onClick={() => void handleSend()}>
               发送
-            </button>
+            </Button>
           )}
           {provider && (
-            <span style={{ fontSize: 11, color: '#9ca3af', alignSelf: 'center' }}>
+            <span
+              style={{
+                fontSize: 11,
+                color: color.textFaint,
+                alignSelf: 'center',
+              }}
+            >
               {provider.supportsStreaming ? '流式输出' : '非流式输出'}
             </span>
           )}
         </div>
-        <label
+        <Checkbox
+          size="sm"
+          checked={skipConfirm}
+          onChange={() => void handleToggleSkipConfirm()}
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            marginTop: 6,
-            fontSize: 11,
-            color: skipConfirm ? '#b91c1c' : '#6b7280',
-            cursor: 'pointer',
-            userSelect: 'none',
+            marginTop: space.sm,
+            color: skipConfirm ? color.danger : color.textMuted,
           }}
-        >
-          <input
-            type="checkbox"
-            checked={skipConfirm}
-            onChange={() => void handleToggleSkipConfirm()}
-            style={{ cursor: 'pointer' }}
-          />
-          <span style={{color:'orange'}}>
-            {skipConfirm
-              ? '⚠️ 已开启：全局自动执行风险操作（不再弹窗确认）'
-              : '允许全局自动执行风险操作（默认关闭）'}
-          </span>
-        </label>
+          label={
+            <span style={{ color: 'orange' }}>
+              {skipConfirm
+                ? '⚠️ 已开启：全局自动执行风险操作（不再弹窗确认）'
+                : '允许全局自动执行风险操作（默认关闭）'}
+            </span>
+          }
+        />
         </footer>
       )}
     </div>
   )
-}
-
-function toolbarButtonStyle(disabled: boolean): CSSProperties {
-  return {
-    padding: '3px 8px',
-    fontSize: 12,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    color: disabled ? '#9ca3af' : '#111827',
-    background: 'transparent',
-    border: '1px solid #d4d4d4',
-    borderRadius: 4,
-  }
 }
 
 function describeError(error: unknown): string {

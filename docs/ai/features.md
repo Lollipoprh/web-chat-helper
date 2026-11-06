@@ -32,6 +32,14 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 
 - Main UI: `apps/chrome-extension/src/sidepanel/App.tsx`
 - Task history: `apps/chrome-extension/src/sidepanel/TaskHistory.tsx`
+- Message bubble and tool-call card: `apps/chrome-extension/src/sidepanel/components/`
+
+## UI components and design tokens
+
+- Design tokens (color, radius, font, spacing, control size): `apps/chrome-extension/src/ui/tokens.ts`
+- Shared primitives (Button, Input, TextArea, Select, Checkbox, Field, Alert, Card, Badge, PageHeader): `apps/chrome-extension/src/ui/`
+- Component prop conventions and override rules: `apps/chrome-extension/src/ui/index.ts`
+- Settings-page layout styles: `apps/chrome-extension/src/options/styles.ts`
 
 ## Sessions and task history storage
 
