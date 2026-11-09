@@ -10,6 +10,8 @@ import {
   type LogTaskStatus,
 } from '../shared/step-log-storage'
 import { Badge, Button, Card, color, fontSize, radius, space, type BadgeTone } from '../ui'
+import type { MessageKey } from '../shared/i18n'
+import { useI18n } from '../shared/useI18n'
 
 interface TaskHistoryProps {
   sessionId: string
@@ -20,12 +22,12 @@ interface StepView {
   steps: LogStepRecord[] | null
 }
 
-const STATUS_LABELS: Record<LogTaskStatus, string> = {
-  running: '运行中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
-  interrupted: '已中断',
+const STATUS_LABELS: Record<LogTaskStatus, MessageKey> = {
+  running: 'task.statusRunning',
+  completed: 'task.statusCompleted',
+  failed: 'task.statusFailed',
+  cancelled: 'task.statusCancelled',
+  interrupted: 'task.statusInterrupted',
 }
 
 const STATUS_TONES: Record<LogTaskStatus, BadgeTone> = {
@@ -37,6 +39,7 @@ const STATUS_TONES: Record<LogTaskStatus, BadgeTone> = {
 }
 
 export default function TaskHistory({ sessionId }: TaskHistoryProps) {
+  const { t } = useI18n()
   const [tasks, setTasks] = useState<LogTaskRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
@@ -88,7 +91,7 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
         }}
       >
         <div style={{ flex: 1, color: color.textMuted }}>
-          共 {tasks.length} 个任务，点击查看工具调用明细
+          {t('history.summary', { count: tasks.length })}
         </div>
         <Button
           size="xs"
@@ -96,16 +99,14 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
           onClick={() => void loadTasks()}
           disabled={loading}
         >
-          刷新
+          {t('history.refresh')}
         </Button>
       </div>
 
       {loading ? (
-        <p style={{ color: color.textFaint }}>加载中…</p>
+        <p style={{ color: color.textFaint }}>{t('common.loading')}</p>
       ) : tasks.length === 0 ? (
-        <p style={{ color: color.textFaint }}>
-          当前会话还没有任务记录。发送任务后，工具调用步骤会显示在这里。
-        </p>
+        <p style={{ color: color.textFaint }}>{t('history.empty')}</p>
       ) : (
         tasks.map((task) => (
           <Card
@@ -129,12 +130,14 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
                 }}
               >
                 <Badge tone={STATUS_TONES[task.status]} style={{ marginLeft: 0 }}>
-                  {STATUS_LABELS[task.status]}
+                  {t(STATUS_LABELS[task.status])}
                 </Badge>
                 <span style={{ color: color.textFaint }}>{formatTime(task.createdAt)}</span>
                 <span style={{ color: color.textFaint, marginLeft: 'auto' }}>
-                  {task.rounds} 轮 · {task.stepCount} 步
-                  {task.droppedSteps > 0 ? ` · 丢弃 ${task.droppedSteps}` : ''}
+                  {t('history.roundsSteps', { rounds: task.rounds, steps: task.stepCount })}
+                  {task.droppedSteps > 0
+                    ? t('history.dropped', { count: task.droppedSteps })
+                    : ''}
                 </span>
               </div>
               <div style={{ color: color.text, wordBreak: 'break-word' }}>{task.goal}</div>
@@ -154,7 +157,7 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
               )}
               {task.stopReason && task.stopReason !== 'completed' && (
                 <div style={{ color: color.textFaint, marginTop: 2 }}>
-                  停止原因：{task.stopReason}
+                  {t('history.stopReason', { reason: task.stopReason })}
                 </div>
               )}
             </div>
@@ -169,9 +172,9 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
               >
                 {stepView?.taskId === task.taskId ? (
                   stepView.steps === null ? (
-                    <span style={{ color: color.textFaint }}>读取步骤…</span>
+                    <span style={{ color: color.textFaint }}>{t('history.readingSteps')}</span>
                   ) : stepView.steps.length === 0 ? (
-                    <span style={{ color: color.textFaint }}>该任务没有落盘的步骤。</span>
+                    <span style={{ color: color.textFaint }}>{t('history.noSteps')}</span>
                   ) : (
                     stepView.steps.map((step, index) => (
                       <div
@@ -195,7 +198,7 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
                               marginLeft: 'auto',
                             }}
                           >
-                            {step.ok ? '成功' : step.code ?? '失败'}
+                            {step.ok ? t('history.stepSuccess') : (step.code ?? t('history.stepFailed'))}
                           </span>
                           <span style={{ color: color.textFaint }}>{step.durationMs}ms</span>
                         </div>
@@ -218,7 +221,9 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
                           {step.message}
                         </div>
                         {step.truncated && (
-                          <div style={{ color: color.textFaint, marginTop: 2 }}>内容已截断</div>
+                          <div style={{ color: color.textFaint, marginTop: 2 }}>
+                            {t('history.truncated')}
+                          </div>
                         )}
                       </div>
                     ))

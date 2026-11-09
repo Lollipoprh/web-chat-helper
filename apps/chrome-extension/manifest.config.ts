@@ -4,8 +4,12 @@ import { defineManifest } from '@crxjs/vite-plugin'
 // 路径相对于 vite.config.ts 所在目录（apps/chrome-extension）
 export default defineManifest({
   manifest_version: 3,
+  // 产品名不翻译，保持品牌一致
   name: 'Web Chat Helper',
-  description: '基于 OpenAI 兼容 API 的浏览器 AI 助手，可读取和操作当前网页',
+  // 描述与工具栏提示由 Chrome 在加载扩展时按浏览器语言从 public/_locales 解析，
+  // 因此必须声明 default_locale；界面内文案另由 src/shared/i18n.ts 负责
+  description: '__MSG_extDescription__',
+  default_locale: 'zh_CN',
   version: '0.1.1',
 
   // 权限：sidePanel 侧边栏、storage 存储配置、tabs 标签页访问、scripting 注入脚本、activeTab 当前标签页
@@ -28,7 +32,7 @@ export default defineManifest({
 
   // 工具栏图标：点击后打开侧边栏（由 background 监听 chrome.action.onClicked）
   action: {
-    default_title: 'Web Chat Helper',
+    default_title: '__MSG_actionTitle__',
   },
 
   // 侧边栏入口（Chrome 114+）

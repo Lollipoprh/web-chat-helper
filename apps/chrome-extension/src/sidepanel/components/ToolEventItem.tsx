@@ -1,16 +1,18 @@
 // 工具调用事件卡片：默认收起显示名称/状态/耗时，点击展开参数与结果摘要。
 
 import type { AgentToolEvent } from 'agent-core'
+import { useI18n } from '../../shared/useI18n'
+import type { MessageKey } from '../../shared/i18n'
 import { Button, color, fontSize, radius, space } from '../../ui'
 
 const STATUS_META: Record<
   AgentToolEvent['status'],
-  { text: string; color: string }
+  { labelKey: MessageKey; color: string }
 > = {
-  running: { text: '执行中', color: color.textFaint },
-  awaiting_confirmation: { text: '等待确认', color: color.warning },
-  success: { text: '成功', color: color.success },
-  error: { text: '失败', color: color.danger },
+  running: { labelKey: 'tool.running', color: color.textFaint },
+  awaiting_confirmation: { labelKey: 'tool.awaitingConfirmation', color: color.warning },
+  success: { labelKey: 'tool.success', color: color.success },
+  error: { labelKey: 'tool.error', color: color.danger },
 }
 
 export interface ToolEventItemProps {
@@ -20,6 +22,7 @@ export interface ToolEventItemProps {
 }
 
 export function ToolEventItem({ event, expanded, onToggle }: ToolEventItemProps) {
+  const { t } = useI18n()
   const meta = STATUS_META[event.status]
 
   return (
@@ -51,7 +54,7 @@ export function ToolEventItem({ event, expanded, onToggle }: ToolEventItemProps)
       >
         <span style={{ color: color.textFaint }}>{expanded ? '▾' : '▸'}</span>
         <span style={{ fontFamily: 'monospace' }}>{event.name}</span>
-        <span style={{ color: meta.color, fontWeight: 500 }}>{meta.text}</span>
+        <span style={{ color: meta.color, fontWeight: 500 }}>{t(meta.labelKey)}</span>
         {typeof event.durationMs === 'number' && (
           <span style={{ color: color.textFaint }}>{event.durationMs}ms</span>
         )}
@@ -84,7 +87,7 @@ export function ToolEventItem({ event, expanded, onToggle }: ToolEventItemProps)
           )}
           {event.errorCode && (
             <div style={{ color: color.danger, fontSize: fontSize.xs }}>
-              错误码：{event.errorCode}
+              {t('tool.errorCode', { code: event.errorCode })}
             </div>
           )}
         </div>

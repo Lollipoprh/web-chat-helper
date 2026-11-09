@@ -7,6 +7,7 @@ import {
   type ProviderDraft,
 } from 'llm-client'
 import { requestOriginPermission } from '../shared/permissions'
+import { useI18n } from '../shared/useI18n'
 import { Alert, Button, Card, Checkbox, Field, Input, color, space } from '../ui'
 
 interface ProviderFormProps {
@@ -22,6 +23,7 @@ interface TestFeedback {
 }
 
 export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFormProps) {
+  const { t } = useI18n()
   const [name, setName] = useState(initial?.name ?? '')
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? '')
   const [apiKey, setApiKey] = useState(initial?.apiKey ?? '')
@@ -38,10 +40,10 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
   const parsedEndpoint = baseUrl.trim() ? parseEndpoint(baseUrl) : null
 
   function validateRequired(): string | null {
-    if (!name.trim()) return '请填写供应商名称'
-    if (!baseUrl.trim()) return '请填写 Base URL'
-    if (!apiKey.trim()) return '请填写 API Key'
-    if (!model.trim()) return '请填写 Model'
+    if (!name.trim()) return t('providerForm.errName')
+    if (!baseUrl.trim()) return t('providerForm.errBaseUrl')
+    if (!apiKey.trim()) return t('providerForm.errApiKey')
+    if (!model.trim()) return t('providerForm.errModel')
     return null
   }
 
@@ -55,7 +57,7 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
     if (!parsedEndpoint || !parsedEndpoint.ok) {
       setTestFeedback({
         ok: false,
-        message: parsedEndpoint ? parsedEndpoint.error : '请填写 Base URL',
+        message: parsedEndpoint ? parsedEndpoint.error : t('providerForm.errBaseUrl'),
       })
       return
     }
@@ -65,7 +67,7 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
     if (!granted) {
       setTestFeedback({
         ok: false,
-        message: `未获得 ${parsedEndpoint.endpoint.origin} 的访问权限，无法测试连接`,
+        message: t('providerForm.errPermission', { origin: parsedEndpoint.endpoint.origin }),
       })
       return
     }
@@ -79,7 +81,10 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
     })
     setTestFeedback({
       ok: result.ok,
-      message: `${result.message} · 用时 ${result.durationMs}ms`,
+      message: t('providerForm.testResult', {
+        message: result.message,
+        ms: result.durationMs,
+      }),
     })
     setTesting(false)
   }
@@ -91,7 +96,7 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
       return
     }
     if (!parsedEndpoint || !parsedEndpoint.ok) {
-      setFormError(parsedEndpoint ? parsedEndpoint.error : '请填写 Base URL')
+      setFormError(parsedEndpoint ? parsedEndpoint.error : t('providerForm.errBaseUrl'))
       return
     }
 
@@ -112,12 +117,15 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
   }
 
   return (
-    <Card title={initial ? '编辑供应商' : '新增供应商'} style={{ marginTop: space.xl }}>
+    <Card
+      title={initial ? t('providerForm.editTitle') : t('providerForm.newTitle')}
+      style={{ marginTop: space.xl }}
+    >
       <div style={{ marginTop: space.xl }}>
-        <Field label="名称">
+        <Field label={t('providerForm.nameLabel')}>
           <Input
             value={name}
-            placeholder="例如：公司网关 / 本地模型"
+            placeholder={t('providerForm.namePlaceholder')}
             onChange={(event) => setName(event.target.value)}
           />
         </Field>
@@ -126,8 +134,7 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
           label="Base URL"
           hint={
             <>
-              支持根地址、带版本号地址，或完整的 <code>/chat/completions</code> 地址；仅支持
-              HTTPS，本机地址可用 HTTP。
+              {t('providerForm.baseUrlHint')}
               {parsedEndpoint && (
                 <span
                   style={{
@@ -137,7 +144,9 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
                   }}
                 >
                   {parsedEndpoint.ok
-                    ? `实际请求：${parsedEndpoint.endpoint.chatCompletionsUrl}`
+                    ? t('providerForm.resolvedUrl', {
+                        url: parsedEndpoint.endpoint.chatCompletionsUrl,
+                      })
                     : parsedEndpoint.error}
                 </span>
               )}
@@ -155,14 +164,18 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
         <Field
           label="API Key"
           htmlFor="provider-api-key"
-          hint={apiKey.trim() && !showKey ? `当前填入：${maskApiKey(apiKey)}` : undefined}
+          hint={
+            apiKey.trim() && !showKey
+              ? t('providerForm.apiKeyHint', { masked: maskApiKey(apiKey) })
+              : undefined
+          }
         >
           <div style={{ display: 'flex', gap: space.md }}>
             <Input
               id="provider-api-key"
               type={showKey ? 'text' : 'password'}
               value={apiKey}
-              placeholder="仅保存在本机浏览器存储中"
+              placeholder={t('providerForm.apiKeyPlaceholder')}
               spellCheck={false}
               autoComplete="off"
               onChange={(event) => setApiKey(event.target.value)}
@@ -172,7 +185,7 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
               style={{ whiteSpace: 'nowrap' }}
               onClick={() => setShowKey((value) => !value)}
             >
-              {showKey ? '隐藏' : '显示'}
+              {showKey ? t('providerForm.hideKey') : t('providerForm.showKey')}
             </Button>
           </div>
         </Field>
@@ -180,7 +193,7 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
         <Field label="Model">
           <Input
             value={model}
-            placeholder="填写该服务商提供的模型名"
+            placeholder={t('providerForm.modelPlaceholder')}
             spellCheck={false}
             onChange={(event) => setModel(event.target.value)}
           />
@@ -196,12 +209,12 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
           <Checkbox
             checked={supportsStreaming}
             onChange={(event) => setSupportsStreaming(event.target.checked)}
-            label="支持流式输出"
+            label={t('providerForm.supportsStreaming')}
           />
           <Checkbox
             checked={supportsToolCalls}
             onChange={(event) => setSupportsToolCalls(event.target.checked)}
-            label="支持 Tool Calls"
+            label={t('providerForm.supportsToolCalls')}
           />
         </div>
 
@@ -224,23 +237,23 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
           <Button
             variant="primary"
             loading={saving}
-            loadingText="保存中…"
+            loadingText={t('providerForm.saving')}
             disabled={testing}
             onClick={() => void handleSubmit()}
           >
-            保存
+            {t('common.save')}
           </Button>
           <Button
             variant="secondary"
             loading={testing}
-            loadingText="测试中…"
+            loadingText={t('providerForm.testing')}
             disabled={saving}
             onClick={() => void handleTest()}
           >
-            测试连接
+            {t('providerForm.test')}
           </Button>
           <Button variant="danger" disabled={saving} onClick={onCancel}>
-            取消
+            {t('common.cancel')}
           </Button>
         </div>
       </div>

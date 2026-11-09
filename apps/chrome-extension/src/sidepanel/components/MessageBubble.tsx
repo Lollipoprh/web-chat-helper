@@ -1,6 +1,7 @@
 // 单条对话消息的气泡。只负责展示，不持有任何业务状态。
 
 import type { CSSProperties } from 'react'
+import { useI18n } from '../../shared/useI18n'
 import { color, fontSize, radius } from '../../ui'
 
 export type MessageStatus = 'complete' | 'streaming' | 'error' | 'cancelled'
@@ -13,6 +14,7 @@ export interface MessageBubbleProps {
 }
 
 export function MessageBubble({ role, content, status, error }: MessageBubbleProps) {
+  const { t } = useI18n()
   const isUser = role === 'user'
   const isError = !isUser && status === 'error'
 
@@ -36,15 +38,17 @@ export function MessageBubble({ role, content, status, error }: MessageBubblePro
         (content ? (
           <span style={{ color: color.textFaint }}> ▍</span>
         ) : (
-          <span style={{ color: color.textFaint }}>正在生成…</span>
+          <span style={{ color: color.textFaint }}>{t('message.generating')}</span>
         ))}
       {status === 'cancelled' && (
-        <span style={{ color: color.textFaint, fontSize: fontSize.xs }}>（已取消）</span>
+        <span style={{ color: color.textFaint, fontSize: fontSize.xs }}>
+          {t('message.cancelled')}
+        </span>
       )}
       {status === 'error' && (
         <span style={{ color: color.danger, fontSize: fontSize.xs }}>
           {content ? ' ' : ''}
-          {error ?? '生成失败'}
+          {error ?? t('message.failed')}
         </span>
       )}
     </div>

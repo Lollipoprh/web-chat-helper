@@ -34,6 +34,15 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 - Task history: `apps/chrome-extension/src/sidepanel/TaskHistory.tsx`
 - Message bubble and tool-call card: `apps/chrome-extension/src/sidepanel/components/`
 
+## Interface language (zh / en)
+
+- Message tables and resolution: `apps/chrome-extension/src/shared/i18n.ts` (`translate`, `resolveLang`, `detectLang`, `UI_LANGUAGE_KEY`)
+- React binding and language switcher state: `apps/chrome-extension/src/shared/useI18n.ts` (`useI18n`)
+- Manifest-level strings (name, store description, toolbar tooltip): `apps/chrome-extension/public/_locales/`, `apps/chrome-extension/manifest.config.ts` (`default_locale`)
+- Language picker (Settings → 通用): `apps/chrome-extension/src/options/App.tsx` (`GeneralPanel`)
+- Task text in the UI (history cards, tool-call cards, message bubbles, banners, confirm dialogs) all go through `t()`; dynamic strings use `useI18n()`
+- Deliberately not localized: tool-result messages returned to the model in `apps/chrome-extension/src/background/index.ts` and `apps/chrome-extension/src/sidepanel/file-tools.ts` — the model reads them, they are not rendered as UI
+
 ## UI components and design tokens
 
 - Design tokens (color, radius, font, spacing, control size): `apps/chrome-extension/src/ui/tokens.ts`

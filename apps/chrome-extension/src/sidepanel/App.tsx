@@ -41,6 +41,7 @@ import {
   type AgentCheckpointRecord,
 } from '../shared/checkpoint-storage'
 import { createBrowserTransport } from '../shared/browser-transport'
+import { useI18n } from '../shared/useI18n'
 import {
   deleteTasksForSession,
   finishTask,
@@ -108,6 +109,12 @@ interface UiMessage {
 }
 
 export default function App() {
+  const { t } = useI18n()
+  // 初始化 effect 只在挂载时跑一次：里面用到的 t 走 ref，避免切换语言时重跑并覆盖正在进行的会话
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
   const [provider, setProvider] = useState<ProviderConfig | null>(null)
   // 已配置的供应商列表，供底部输入区切换模型
   const [providers, setProviders] = useState<ProviderConfig[]>([])
@@ -201,7 +208,7 @@ export default function App() {
         setAgentLimits(limits)
       } catch (error) {
         console.warn('[session] 加载会话失败', error)
-        setBanner('本地会话数据读取失败，可尝试重新打开侧边栏。')
+        setBanner(tRef.current('sidepanel.localDataFailed'))
       } finally {
         setHistoryLoaded(true)
       }
@@ -286,15 +293,15 @@ export default function App() {
     const granted = await requestOriginPermissions([pendingPageOrigin])
     if (granted) {
       setPendingPageOrigin(null)
-      setBanner('已授权当前站点，请重新发送任务。')
+      setBanner(t('sidepanel.granted'))
     } else {
-      setBanner('授权被拒绝，无法读取或操作当前页面。')
+      setBanner(t('sidepanel.grantDenied'))
     }
-  }, [pendingPageOrigin])
+  }, [pendingPageOrigin, t])
 
   const handleClear = useCallback(async () => {
     if (!activeSessionId || generating) return
-    if (!window.confirm('确定清空当前对话吗？')) return
+    if (!window.confirm(t('sidepanel.confirmClear'))) return
     abortRef.current?.abort()
     confirmResolverRef.current?.(false)
     confirmResolverRef.current = null
@@ -305,7 +312,7 @@ export default function App() {
     await Promise.all([clearSessionMessages(activeSessionId), clearAgentCheckpoint()])
     setInterruptedCheckpoint(null)
     void refreshSessions()
-  }, [activeSessionId, generating, refreshSessions])
+  }, [activeSessionId, generating, refreshSessions, t])
 
   // 切换会话：生成过程中禁止切换，避免把一条回复写进另一个会话
   const handleSwitchSession = useCallback(
@@ -322,12 +329,12 @@ export default function App() {
         await saveActiveSessionId(sessionId)
       } catch (error) {
         console.warn('[session] 切换会话失败', error)
-        setBanner('会话加载失败，请重试。')
+        setBanner(t('sidepanel.sessionLoadFailed'))
       } finally {
         setHistoryLoaded(true)
       }
     },
-    [generating, historyLoaded, activeSessionId],
+    [generating, historyLoaded, activeSessionId, t],
   )
 
   const handleNewSession = useCallback(async () => {
@@ -344,13 +351,13 @@ export default function App() {
       setView('chat')
     } catch (error) {
       console.warn('[session] 新建会话失败', error)
-      setBanner('新建会话失败，请重试。')
+      setBanner(t('sidepanel.newSessionFailed'))
     }
-  }, [generating])
+  }, [generating, t])
 
   const handleDeleteSession = useCallback(async () => {
     if (generating || !activeSessionId) return
-    if (!window.confirm('删除当前会话及其任务记录？')) return
+    if (!window.confirm(t('sidepanel.confirmDeleteSession'))) return
 
     setHistoryLoaded(false)
     try {
@@ -369,11 +376,11 @@ export default function App() {
       setBanner(null)
     } catch (error) {
       console.warn('[session] 删除会话失败', error)
-      setBanner('删除会话失败，请重试。')
+      setBanner(t('sidepanel.deleteSessionFailed'))
     } finally {
       setHistoryLoaded(true)
     }
-  }, [generating, activeSessionId, sessions])
+  }, [generating, activeSessionId, sessions, t])
 
   const handleConfirmAction = useCallback(() => {
     confirmResolverRef.current?.(true)
@@ -409,14 +416,12 @@ export default function App() {
   const handleToggleSkipConfirm = useCallback(async () => {
     const next = !skipConfirm
     if (next) {
-      const ok = window.confirm(
-        '⚠️ 风险提示\n\n开启后，模型执行 click / fill / submit 等副作用动作时将不再弹窗确认，页面上的任何操作都会自动执行。\n\n请确认当前网站可信、模型指令可控。继续？',
-      )
+      const ok = window.confirm(t('sidepanel.skipConfirmWarning'))
       if (!ok) return
     }
     await saveSkipConfirm(next)
     setSkipConfirm(next)
-  }, [skipConfirm])
+  }, [skipConfirm, t])
 
   // 刷新已绑定文件列表
   const refreshBoundFiles = useCallback(async () => {
@@ -432,15 +437,15 @@ export default function App() {
     try {
       const record = await bindFile()
       await refreshBoundFiles()
-      setBanner(`已绑定文件「${record.name}」`)
+      setBanner(t('sidepanel.fileBound', { name: record.name }))
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : '绑定文件失败'
+        error instanceof Error ? error.message : t('sidepanel.bindFileFailed')
       // 用户取消文件选择器时不显示错误
       if (message.includes('aborted') || message.includes('cancel')) return
       setBanner(message)
     }
-  }, [refreshBoundFiles])
+  }, [refreshBoundFiles, t])
 
   // 解绑文件
   const handleUnbindFile = useCallback(
@@ -450,10 +455,10 @@ export default function App() {
         await refreshBoundFiles()
       } catch (error) {
         console.warn('[file] 解绑文件失败', error)
-        setBanner('解绑文件失败，请重试')
+        setBanner(t('sidepanel.unbindFileFailed'))
       }
     },
-    [refreshBoundFiles],
+    [refreshBoundFiles, t],
   )
 
   // 展开文件管理面板时刷新列表
@@ -496,10 +501,10 @@ export default function App() {
         origins: [endpoint.endpoint.originPattern],
       })
       if (!modelGranted) {
-        setBanner('未获得模型服务的访问权限，无法执行任务')
+        setBanner(t('sidepanel.modelPermissionDenied'))
         return
       }
-      pageWarning = '未获得当前网页的访问权限，本次任务无法读取或操作页面'
+      pageWarning = t('sidepanel.pagePermissionDenied')
     }
 
     const now = Date.now()
@@ -601,7 +606,7 @@ export default function App() {
       // 站点未授权时提供一键授权入口；授权后由用户重新发送任务
       if (event.status === 'error' && event.errorCode === 'not_authorized') {
         void refreshPendingOrigin()
-        setBanner(event.summary ?? '当前页面尚未授权，无法操作')
+        setBanner(event.summary ?? t('sidepanel.notAuthorized'))
       }
       setMessages((prev) =>
         prev.map((message) => {
@@ -710,13 +715,16 @@ export default function App() {
         }
 
         if (result.stopReason === 'error') {
-          const message = result.error ?? '工具调用流程失败'
+          const message = result.error ?? t('sidepanel.agentFailed')
           finalize('error', message)
           setBanner(message)
         } else {
           if (result.stopReason === 'round_limit') {
             setBanner(
-              `已达到 ${result.rounds} 轮工具调用上限，任务已停止。已完成 ${result.logs.length} 次工具调用。`,
+              t('sidepanel.roundLimit', {
+                rounds: result.rounds,
+                calls: result.logs.length,
+              }),
             )
           }
           finalize(result.stopReason === 'cancelled' ? 'cancelled' : 'complete')
@@ -748,7 +756,7 @@ export default function App() {
     } catch (error) {
       const cancelled =
         (error instanceof LLMError && error.code === 'aborted') || controller.signal.aborted
-      const message = cancelled ? '已取消' : describeError(error)
+      const message = cancelled ? t('sidepanel.cancelled') : describeError(error)
 
       taskStatus = cancelled ? 'cancelled' : 'failed'
       finalize(cancelled ? 'cancelled' : 'error', message)
@@ -825,11 +833,11 @@ export default function App() {
               whiteSpace: 'nowrap',
             }}
           >
-            {provider ? `${provider.name} · ${provider.model}` : '未配置供应商'}
+            {provider ? `${provider.name} · ${provider.model}` : t('sidepanel.noProvider')}
           </div>
         </div>
         <Button variant="secondary" size="sm" onClick={openOptions}>
-          设置
+          {t('common.settings')}
         </Button>
       </header>
 
@@ -847,7 +855,7 @@ export default function App() {
           value={activeSessionId ?? ''}
           onChange={(event) => void handleSwitchSession(event.target.value)}
           disabled={generating || !historyLoaded || sessions.length === 0}
-          title="切换会话"
+          title={t('sidepanel.switchSession')}
           size="sm"
           block={false}
           options={sessions.map((session) => ({
@@ -861,40 +869,40 @@ export default function App() {
           onClick={() => void handleNewSession()}
           disabled={generating}
         >
-          新建
+          {t('sidepanel.newSession')}
         </Button>
         <Button
           size="sm"
           onClick={() => void handleDeleteSession()}
           disabled={generating || !activeSessionId}
         >
-          删除
+          {t('sidepanel.deleteSession')}
         </Button>
         <Button
           size="sm"
           onClick={handleClear}
           disabled={generating || !activeSessionId}
         >
-          清空
+          {t('sidepanel.clearChat')}
         </Button>
         <Button size="sm" onClick={toggleFileManager}>
-          {showFileManager ? '收起文件' : '文件管理'}
+          {showFileManager ? t('sidepanel.filesHide') : t('sidepanel.files')}
         </Button>
       </div>
 
       {showFileManager && (
         <Alert tone="info" flush style={{ padding: '10px 14px' }}>
           <div style={{ fontWeight: 600, marginBottom: space.md }}>
-            本地文件管理（供模型读写）
+            {t('sidepanel.fileManagerTitle')}
           </div>
           <div style={{ marginBottom: space.md }}>
             <Button variant="primary" size="sm" onClick={() => void handleBindFile()}>
-              绑定文件
+              {t('sidepanel.bindFile')}
             </Button>
           </div>
           {boundFiles.length === 0 ? (
             <div style={{ color: color.textMuted, fontSize: fontSize.xs }}>
-              尚未绑定文件。绑定后模型可通过文件名读取和写入该文件。
+              {t('sidepanel.noFiles')}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: space.xs }}>
@@ -927,7 +935,7 @@ export default function App() {
                     size="xs"
                     onClick={() => void handleUnbindFile(file.name)}
                   >
-                    解绑
+                    {t('sidepanel.unbind')}
                   </Button>
                 </div>
               ))}
@@ -950,7 +958,7 @@ export default function App() {
                 }}
                 onClick={() => void handleGrantPagePermission()}
               >
-                授权当前站点
+                {t('sidepanel.grantSite')}
               </Button>
             </div>
           )}
@@ -969,7 +977,7 @@ export default function App() {
           }}
         >
           <span style={{ flex: 1 }}>
-            上次任务已中断（第 {interruptedCheckpoint.rounds} 轮）。为避免重放副作用步骤，恢复前请重新发送，不自动执行旧动作。
+            {t('sidepanel.checkpointNotice', { rounds: interruptedCheckpoint.rounds })}
           </span>
           <Button
             size="sm"
@@ -980,7 +988,7 @@ export default function App() {
             }}
             onClick={() => void handleDismissInterrupted()}
           >
-            清除
+            {t('sidepanel.dismiss')}
           </Button>
         </Alert>
       )}
@@ -988,7 +996,8 @@ export default function App() {
       {pendingConfirmation && (
         <Alert tone="warning" flush style={{ padding: '10px 14px' }}>
           <div style={{ fontWeight: 600, marginBottom: space.sm }}>
-            等待确认：<span style={{ fontFamily: 'monospace' }}>{pendingConfirmation.toolName}</span>
+            {t('sidepanel.awaitingConfirmation')}
+            <span style={{ fontFamily: 'monospace' }}>{pendingConfirmation.toolName}</span>
           </div>
           <div
             style={{
@@ -1013,7 +1022,7 @@ export default function App() {
               }}
               onClick={handleConfirmAction}
             >
-              确认执行
+              {t('sidepanel.run')}
             </Button>
             <Button
               size="sm"
@@ -1021,7 +1030,7 @@ export default function App() {
               style={{ color: color.warningText, borderColor: color.warningBorder }}
               onClick={handleDenyAction}
             >
-              拒绝
+              {t('sidepanel.deny')}
             </Button>
           </div>
         </Alert>
@@ -1045,23 +1054,25 @@ export default function App() {
           <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
             <main style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
               {loading ? (
-                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>加载中…</p>
+                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
+                  {t('common.loading')}
+                </p>
               ) : !provider ? (
                 <div
                   style={{ textAlign: 'center', color: color.textSecondary, marginTop: 40 }}
                 >
-                  <p style={{ margin: 0 }}>尚未配置模型供应商</p>
+                  <p style={{ margin: 0 }}>{t('sidepanel.noProviderTitle')}</p>
                   <Button
                     variant="primary"
                     style={{ marginTop: space.lg }}
                     onClick={openOptions}
                   >
-                    前往设置
+                    {t('sidepanel.openSettings')}
                   </Button>
                 </div>
               ) : messages.length === 0 ? (
                 <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
-                  输入问题开始对话。
+                  {t('sidepanel.emptyChat')}
                 </p>
               ) : (
                 messages.map((message) => (
@@ -1112,7 +1123,7 @@ export default function App() {
               <div ref={bottomRef} />
             </main>
             <PullTab
-              label="任务记录"
+              label={t('sidepanel.tasks')}
               disabled={!activeSessionId}
               onClick={() => setView('history')}
             />
@@ -1132,7 +1143,9 @@ export default function App() {
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={
-                  provider ? '输入问题，Enter 发送，Shift+Enter 换行' : '请先配置供应商'
+                  provider
+                    ? t('sidepanel.inputPlaceholder')
+                    : t('sidepanel.inputPlaceholderNoProvider')
                 }
                 disabled={!provider || loading}
                 rows={3}
@@ -1166,7 +1179,7 @@ export default function App() {
                   />
                 ) : (
                   <span style={{ flex: 1, fontSize: 11, color: color.textFaint }}>
-                    未配置供应商
+                    {t('sidepanel.noProvider')}
                   </span>
                 )}
                 <Select
@@ -1179,12 +1192,12 @@ export default function App() {
                   }}
                   title={
                     skipConfirm
-                      ? '已开启：全局自动执行风险操作（不再弹窗确认）'
-                      : '允许全局自动执行风险操作（默认关闭）'
+                      ? t('sidepanel.autoModeOnTitle')
+                      : t('sidepanel.autoModeOffTitle')
                   }
                   options={[
-                    { value: 'confirm', label: '操作需确认' },
-                    { value: 'skip', label: '操作自动执行' },
+                    { value: 'confirm', label: t('sidepanel.confirmMode') },
+                    { value: 'skip', label: t('sidepanel.autoMode') },
                   ]}
                   style={{
                     flex: 'none',
@@ -1204,7 +1217,9 @@ export default function App() {
                       color: color.textFaint,
                     }}
                   >
-                    {provider.supportsStreaming ? '流式输出' : '非流式输出'}
+                    {provider.supportsStreaming
+                      ? t('sidepanel.streaming')
+                      : t('sidepanel.nonStreaming')}
                   </span>
                 )}
                 {generating ? (
@@ -1214,7 +1229,7 @@ export default function App() {
                     style={{ marginLeft: 'auto' }}
                     onClick={handleStop}
                   >
-                    停止
+                    {t('sidepanel.stop')}
                   </Button>
                 ) : (
                   <Button
@@ -1224,7 +1239,7 @@ export default function App() {
                     style={{ marginLeft: 'auto' }}
                     onClick={() => void handleSend()}
                   >
-                    发送
+                    {t('sidepanel.send')}
                   </Button>
                 )}
               </div>
@@ -1250,11 +1265,13 @@ export default function App() {
               {activeSessionId ? (
                 <TaskHistory sessionId={activeSessionId} />
               ) : (
-                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>尚未选择会话</p>
+                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
+                  {t('sidepanel.noSession')}
+                </p>
               )}
             </main>
             <PullTab
-              label="返回对话"
+              label={t('sidepanel.backToChat')}
               disabled={!activeSessionId}
               onClick={() => setView('chat')}
             />

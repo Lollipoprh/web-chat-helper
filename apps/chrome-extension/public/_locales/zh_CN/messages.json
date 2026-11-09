@@ -1,0 +1,10 @@
+{
+  "extDescription": {
+    "message": "基于 OpenAI 兼容 API 的浏览器 AI 助手，可读取和操作当前网页",
+    "description": "扩展在 Chrome 应用商店与扩展管理页中显示的描述"
+  },
+  "actionTitle": {
+    "message": "打开 Web Chat Helper 侧边栏",
+    "description": "工具栏按钮的悬浮提示"
+  }
+}

@@ -15,7 +15,7 @@
 ```bash
 pnpm install     # 安装 workspace 依赖（需要 pnpm 12；esbuild 必须保留在 allowBuilds 中）
 pnpm typecheck   # 对所有 workspace 包执行 tsc --noEmit —— 完成工作前必须通过
-pnpm test        # 运行 llm-client 与 agent-core 的 Vitest 单元测试
+pnpm test        # 运行各包的 Vitest 单元测试（含扩展的 i18n 文案层）
 pnpm build       # 生产构建，产物位于 apps/chrome-extension/dist
 pnpm dev         # Vite + CRXJS 热更新，用于手动调试
 ```
@@ -46,7 +46,7 @@ pnpm dev         # Vite + CRXJS 热更新，用于手动调试
 ## 编码约定
 
 - 全局 TypeScript strict。新代码不使用 `any`；优先使用 `src/shared` 与各 workspace 包中的显式类型。
-- 所有面向用户的 UI 文案使用中文；代码、注释、标识符和提交信息使用英文。新增文案要与现有风格一致。
+- 面向用户的 UI 文案统一走 i18n 层（`src/shared/i18n.ts` + `useI18n()`），目前提供中文与英文两种；不要硬编码界面文案。manifest 层文案用 `__MSG_*__` 配 `public/_locales/`。代码、注释、标识符和提交信息使用英文。新增文案必须同时补 `zh` 与 `en` 两张表（TypeScript 会校验 key 是否齐全）。
 - 业务逻辑中不得硬编码任何供应商地址、模型名或密钥。供应商信息是 `chrome.storage.local` 中的用户数据。
 - 供应商配置存储在 `chrome.storage.local`；日志中绝不输出密钥，参数需脱敏。
 - 跨上下文通信统一走 `chrome.runtime` 消息，并使用 `src/shared/index.ts` 中的常量。新增消息类型要加在那里，不要临时拼字符串。

@@ -15,7 +15,7 @@ No backend, no local server, no Playwright/CDP, no MCP. Only Chrome APIs plus th
 ```bash
 pnpm install     # install workspace deps (needs pnpm 12; esbuild must stay in allowBuilds)
 pnpm typecheck   # tsc --noEmit for every workspace package — run before you claim work is done
-pnpm test        # vitest unit tests for llm-client and agent-core
+pnpm test        # vitest unit tests (packages + the extension i18n layer)
 pnpm build       # production build; output: apps/chrome-extension/dist
 pnpm dev         # Vite + CRXJS hot reload for manual testing
 ```
@@ -65,7 +65,7 @@ Hot files — never read whole, locate first:
 ## Conventions
 
 - TypeScript strict everywhere. No `any` in new code; prefer explicit types from `src/shared` and the workspace packages.
-- All user-facing UI text is Chinese; code, comments, identifiers and commit messages are English. Keep new UI strings consistent with existing ones.
+- UI text goes through the i18n layer (`src/shared/i18n.ts` + `useI18n()`), which ships Chinese and English; do not hardcode user-facing strings. Manifest strings use `__MSG_*__` with `public/_locales/`. Code, comments, identifiers and commit messages are English. Add new keys to both the `zh` and `en` tables — TypeScript enforces key parity.
 - Business logic must not hardcode any provider URL, model name or key. Providers are user data in `chrome.storage.local`.
 - Use `chrome.storage.local` for provider config; never log secrets — redact keys and tool arguments in logs.
 - Message passing between contexts goes through `chrome.runtime` messaging with the constants in `src/shared/index.ts`. Add new message types there rather than inventing inline strings.

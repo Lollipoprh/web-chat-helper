@@ -7,6 +7,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import type { ProviderConfig } from 'llm-client'
+import { useI18n } from '../../shared/useI18n'
 import { color, fontSize, radius, space } from '../../ui'
 
 interface ModelGroup {
@@ -56,17 +57,19 @@ export function ModelPicker({
   disabled = false,
   onChange,
 }: ModelPickerProps) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [anchor, setAnchor] = useState<AnchorRect | null>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
 
-  // 二级数组：一级是供应商分组，二级是该供应商下的模型，渲染时全部展开
+  // 二级数组：一级是供应商分组，二级是该供应商下的模型，渲染时全部展开。
+  // 分组键用原始名称（可能为空串），展示时再回落到「未命名供应商」，避免翻译影响分组。
   const groups = useMemo<ModelGroup[]>(() => {
     const map = new Map<string, ProviderConfig[]>()
     for (const item of providers) {
-      const key = item.name.trim() || '未命名供应商'
+      const key = item.name.trim()
       const existing = map.get(key)
       if (existing) existing.push(item)
       else map.set(key, [item])
@@ -153,7 +156,7 @@ export function ModelPicker({
         type="button"
         onClick={toggle}
         disabled={disabled}
-        title={selected ? `${selected.name} · ${selected.model}` : '切换供应商模型'}
+        title={selected ? `${selected.name} · ${selected.model}` : t('picker.switchModel')}
         aria-haspopup="listbox"
         aria-expanded={open}
         style={{
@@ -171,7 +174,7 @@ export function ModelPicker({
             whiteSpace: 'nowrap',
           }}
         >
-          {selected?.model ?? '选择模型'}
+          {selected?.model ?? t('picker.selectModel')}
         </span>
       </button>
 
@@ -188,7 +191,7 @@ export function ModelPicker({
                     userSelect: 'none',
                   }}
                 >
-                  {group.providerName}
+                  {group.providerName || t('picker.unnamed')}
                 </div>
                 {group.models.map((item) => {
                   const isSelected = item.id === value
