@@ -3,7 +3,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
   type KeyboardEvent,
 } from 'react'
 import {
@@ -42,6 +41,7 @@ import {
   type AgentCheckpointRecord,
 } from '../shared/checkpoint-storage'
 import { createBrowserTransport } from '../shared/browser-transport'
+import { useI18n } from '../shared/useI18n'
 import {
   deleteTasksForSession,
   finishTask,
@@ -64,18 +64,22 @@ import {
   UNSAFE_SKIP_CONFIRM_KEY,
   loadAgentLimits,
   loadDefaultProvider,
+  loadProviders,
   loadSkipConfirm,
   saveSkipConfirm,
+  setDefaultProvider,
 } from '../shared/storage'
 import TaskHistory from './TaskHistory'
+import { MessageBubble, type MessageStatus } from './components/MessageBubble'
+import { ModelPicker } from './components/ModelPicker'
+import { ToolEventItem } from './components/ToolEventItem'
+import { Alert, Button, Select, TextArea, color, fontSize, radius, space } from '../ui'
 import {
   bindFile,
   listBoundFiles,
   unbindFile,
   type BoundFileMeta,
 } from '../shared/file-handle-store'
-
-type MessageStatus = 'complete' | 'streaming' | 'error' | 'cancelled'
 
 /**
  * System prompt (English) —— concise, scope-locked.
@@ -105,7 +109,15 @@ interface UiMessage {
 }
 
 export default function App() {
+  const { t } = useI18n()
+  // 初始化 effect 只在挂载时跑一次：里面用到的 t 走 ref，避免切换语言时重跑并覆盖正在进行的会话
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
   const [provider, setProvider] = useState<ProviderConfig | null>(null)
+  // 已配置的供应商列表，供底部输入区切换模型
+  const [providers, setProviders] = useState<ProviderConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [sessions, setSessions] = useState<SessionRecord[]>([])
@@ -146,10 +158,14 @@ export default function App() {
   // 当前活动标签页：发送任务时同步读取，用于绑定目标页并申请站点权限
   const activeTabRef = useRef<{ id?: number; url?: string } | null>(null)
 
-  // 读取默认供应商
+  // 读取默认供应商及其余可选供应商
   const refreshProvider = useCallback(async () => {
-    const defaultProvider = await loadDefaultProvider()
+    const [defaultProvider, allProviders] = await Promise.all([
+      loadDefaultProvider(),
+      loadProviders(),
+    ])
     setProvider(defaultProvider)
+    setProviders(allProviders)
     setLoading(false)
   }, [])
 
@@ -192,7 +208,7 @@ export default function App() {
         setAgentLimits(limits)
       } catch (error) {
         console.warn('[session] 加载会话失败', error)
-        setBanner('本地会话数据读取失败，可尝试重新打开侧边栏。')
+        setBanner(tRef.current('sidepanel.localDataFailed'))
       } finally {
         setHistoryLoaded(true)
       }
@@ -277,15 +293,15 @@ export default function App() {
     const granted = await requestOriginPermissions([pendingPageOrigin])
     if (granted) {
       setPendingPageOrigin(null)
-      setBanner('已授权当前站点，请重新发送任务。')
+      setBanner(t('sidepanel.granted'))
     } else {
-      setBanner('授权被拒绝，无法读取或操作当前页面。')
+      setBanner(t('sidepanel.grantDenied'))
     }
-  }, [pendingPageOrigin])
+  }, [pendingPageOrigin, t])
 
   const handleClear = useCallback(async () => {
     if (!activeSessionId || generating) return
-    if (!window.confirm('确定清空当前对话吗？')) return
+    if (!window.confirm(t('sidepanel.confirmClear'))) return
     abortRef.current?.abort()
     confirmResolverRef.current?.(false)
     confirmResolverRef.current = null
@@ -296,7 +312,7 @@ export default function App() {
     await Promise.all([clearSessionMessages(activeSessionId), clearAgentCheckpoint()])
     setInterruptedCheckpoint(null)
     void refreshSessions()
-  }, [activeSessionId, generating, refreshSessions])
+  }, [activeSessionId, generating, refreshSessions, t])
 
   // 切换会话：生成过程中禁止切换，避免把一条回复写进另一个会话
   const handleSwitchSession = useCallback(
@@ -313,12 +329,12 @@ export default function App() {
         await saveActiveSessionId(sessionId)
       } catch (error) {
         console.warn('[session] 切换会话失败', error)
-        setBanner('会话加载失败，请重试。')
+        setBanner(t('sidepanel.sessionLoadFailed'))
       } finally {
         setHistoryLoaded(true)
       }
     },
-    [generating, historyLoaded, activeSessionId],
+    [generating, historyLoaded, activeSessionId, t],
   )
 
   const handleNewSession = useCallback(async () => {
@@ -335,13 +351,13 @@ export default function App() {
       setView('chat')
     } catch (error) {
       console.warn('[session] 新建会话失败', error)
-      setBanner('新建会话失败，请重试。')
+      setBanner(t('sidepanel.newSessionFailed'))
     }
-  }, [generating])
+  }, [generating, t])
 
   const handleDeleteSession = useCallback(async () => {
     if (generating || !activeSessionId) return
-    if (!window.confirm('删除当前会话及其任务记录？')) return
+    if (!window.confirm(t('sidepanel.confirmDeleteSession'))) return
 
     setHistoryLoaded(false)
     try {
@@ -360,11 +376,11 @@ export default function App() {
       setBanner(null)
     } catch (error) {
       console.warn('[session] 删除会话失败', error)
-      setBanner('删除会话失败，请重试。')
+      setBanner(t('sidepanel.deleteSessionFailed'))
     } finally {
       setHistoryLoaded(true)
     }
-  }, [generating, activeSessionId, sessions])
+  }, [generating, activeSessionId, sessions, t])
 
   const handleConfirmAction = useCallback(() => {
     confirmResolverRef.current?.(true)
@@ -400,14 +416,12 @@ export default function App() {
   const handleToggleSkipConfirm = useCallback(async () => {
     const next = !skipConfirm
     if (next) {
-      const ok = window.confirm(
-        '⚠️ 风险提示\n\n开启后，模型执行 click / fill / submit 等副作用动作时将不再弹窗确认，页面上的任何操作都会自动执行。\n\n请确认当前网站可信、模型指令可控。继续？',
-      )
+      const ok = window.confirm(t('sidepanel.skipConfirmWarning'))
       if (!ok) return
     }
     await saveSkipConfirm(next)
     setSkipConfirm(next)
-  }, [skipConfirm])
+  }, [skipConfirm, t])
 
   // 刷新已绑定文件列表
   const refreshBoundFiles = useCallback(async () => {
@@ -423,15 +437,15 @@ export default function App() {
     try {
       const record = await bindFile()
       await refreshBoundFiles()
-      setBanner(`已绑定文件「${record.name}」`)
+      setBanner(t('sidepanel.fileBound', { name: record.name }))
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : '绑定文件失败'
+        error instanceof Error ? error.message : t('sidepanel.bindFileFailed')
       // 用户取消文件选择器时不显示错误
       if (message.includes('aborted') || message.includes('cancel')) return
       setBanner(message)
     }
-  }, [refreshBoundFiles])
+  }, [refreshBoundFiles, t])
 
   // 解绑文件
   const handleUnbindFile = useCallback(
@@ -441,10 +455,10 @@ export default function App() {
         await refreshBoundFiles()
       } catch (error) {
         console.warn('[file] 解绑文件失败', error)
-        setBanner('解绑文件失败，请重试')
+        setBanner(t('sidepanel.unbindFileFailed'))
       }
     },
-    [refreshBoundFiles],
+    [refreshBoundFiles, t],
   )
 
   // 展开文件管理面板时刷新列表
@@ -487,10 +501,10 @@ export default function App() {
         origins: [endpoint.endpoint.originPattern],
       })
       if (!modelGranted) {
-        setBanner('未获得模型服务的访问权限，无法执行任务')
+        setBanner(t('sidepanel.modelPermissionDenied'))
         return
       }
-      pageWarning = '未获得当前网页的访问权限，本次任务无法读取或操作页面'
+      pageWarning = t('sidepanel.pagePermissionDenied')
     }
 
     const now = Date.now()
@@ -592,7 +606,7 @@ export default function App() {
       // 站点未授权时提供一键授权入口；授权后由用户重新发送任务
       if (event.status === 'error' && event.errorCode === 'not_authorized') {
         void refreshPendingOrigin()
-        setBanner(event.summary ?? '当前页面尚未授权，无法操作')
+        setBanner(event.summary ?? t('sidepanel.notAuthorized'))
       }
       setMessages((prev) =>
         prev.map((message) => {
@@ -701,13 +715,16 @@ export default function App() {
         }
 
         if (result.stopReason === 'error') {
-          const message = result.error ?? '工具调用流程失败'
+          const message = result.error ?? t('sidepanel.agentFailed')
           finalize('error', message)
           setBanner(message)
         } else {
           if (result.stopReason === 'round_limit') {
             setBanner(
-              `已达到 ${result.rounds} 轮工具调用上限，任务已停止。已完成 ${result.logs.length} 次工具调用。`,
+              t('sidepanel.roundLimit', {
+                rounds: result.rounds,
+                calls: result.logs.length,
+              }),
             )
           }
           finalize(result.stopReason === 'cancelled' ? 'cancelled' : 'complete')
@@ -739,7 +756,7 @@ export default function App() {
     } catch (error) {
       const cancelled =
         (error instanceof LLMError && error.code === 'aborted') || controller.signal.aborted
-      const message = cancelled ? '已取消' : describeError(error)
+      const message = cancelled ? t('sidepanel.cancelled') : describeError(error)
 
       taskStatus = cancelled ? 'cancelled' : 'failed'
       finalize(cancelled ? 'cancelled' : 'error', message)
@@ -783,6 +800,14 @@ export default function App() {
     }
   }
 
+  // 切换供应商：只改默认项，storage 监听器会刷新当前 provider
+  function handleProviderChange(id: string) {
+    if (!id || id === provider?.id) return
+    void setDefaultProvider(id).catch((error: unknown) => {
+      console.warn('[sidepanel] 切换供应商失败', error)
+    })
+  }
+
   const canSend =
     Boolean(provider) && Boolean(activeSessionId) && input.trim().length > 0 && !generating
 
@@ -791,7 +816,7 @@ export default function App() {
       <header
         style={{
           padding: '10px 14px',
-          borderBottom: '1px solid #e5e5e5',
+          borderBottom: `1px solid ${color.border}`,
           display: 'flex',
           alignItems: 'center',
           gap: 8,
@@ -802,613 +827,504 @@ export default function App() {
           <div
             style={{
               fontSize: 11,
-              color: '#9ca3af',
+              color: color.textFaint,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
           >
-            {provider ? `${provider.name} · ${provider.model}` : '未配置供应商'}
+            {provider ? `${provider.name} · ${provider.model}` : t('sidepanel.noProvider')}
           </div>
         </div>
-        <button
-          onClick={openOptions}
-          style={{
-            padding: '3px 8px',
-            fontSize: 12,
-            cursor: 'pointer',
-            background: 'transparent',
-            border: '1px solid #d4d4d4',
-            borderRadius: 4,
-          }}
-        >
-          设置
-        </button>
+        <Button variant="secondary" size="sm" onClick={openOptions}>
+          {t('common.settings')}
+        </Button>
       </header>
 
       <div
         style={{
           padding: '8px 14px',
-          borderBottom: '1px solid #e5e5e5',
+          borderBottom: `1px solid ${color.border}`,
           display: 'flex',
           alignItems: 'center',
           gap: 6,
           flexWrap: 'wrap',
         }}
       >
-        <select
+        <Select
           value={activeSessionId ?? ''}
           onChange={(event) => void handleSwitchSession(event.target.value)}
           disabled={generating || !historyLoaded || sessions.length === 0}
-          title="切换会话"
-          style={{
-            flex: '1 1 120px',
-            minWidth: 0,
-            fontSize: 12,
-            padding: '3px 4px',
-            border: '1px solid #d4d4d4',
-            borderRadius: 4,
-            background: '#fff',
-          }}
-        >
-          {sessions.map((session) => (
-            <option key={session.sessionId} value={session.sessionId}>
-              {session.title}（{session.messageCount}）
-            </option>
-          ))}
-        </select>
-        <button
+          title={t('sidepanel.switchSession')}
+          size="sm"
+          block={false}
+          options={sessions.map((session) => ({
+            value: session.sessionId,
+            label: `${session.title}（${session.messageCount}）`,
+          }))}
+          style={{ flex: '1 1 120px', minWidth: 0 }}
+        />
+        <Button
+          size="sm"
           onClick={() => void handleNewSession()}
           disabled={generating}
-          style={toolbarButtonStyle(generating)}
         >
-          新建
-        </button>
-        <button
+          {t('sidepanel.newSession')}
+        </Button>
+        <Button
+          size="sm"
           onClick={() => void handleDeleteSession()}
           disabled={generating || !activeSessionId}
-          style={toolbarButtonStyle(generating || !activeSessionId)}
         >
-          删除
-        </button>
-        <button
+          {t('sidepanel.deleteSession')}
+        </Button>
+        <Button
+          size="sm"
           onClick={handleClear}
           disabled={generating || !activeSessionId}
-          style={toolbarButtonStyle(generating || !activeSessionId)}
         >
-          清空
-        </button>
-        <button
-          onClick={() => setView((current) => (current === 'history' ? 'chat' : 'history'))}
-          disabled={!activeSessionId}
-          style={toolbarButtonStyle(!activeSessionId)}
-        >
-          {view === 'history' ? '返回对话' : '任务记录'}
-        </button>
-        <button
-          onClick={toggleFileManager}
-          style={toolbarButtonStyle(false)}
-        >
-          {showFileManager ? '收起文件' : '文件管理'}
-        </button>
+          {t('sidepanel.clearChat')}
+        </Button>
+        <Button size="sm" onClick={toggleFileManager}>
+          {showFileManager ? t('sidepanel.filesHide') : t('sidepanel.files')}
+        </Button>
       </div>
 
       {showFileManager && (
-        <div
-          style={{
-            padding: '10px 14px',
-            fontSize: 12,
-            lineHeight: 1.6,
-            background: '#f0f9ff',
-            color: '#0c4a6e',
-            borderBottom: '1px solid #bae6fd',
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>
-            本地文件管理（供模型读写）
+        <Alert tone="info" flush style={{ padding: '10px 14px' }}>
+          <div style={{ fontWeight: 600, marginBottom: space.md }}>
+            {t('sidepanel.fileManagerTitle')}
           </div>
-          <div style={{ marginBottom: 8 }}>
-            <button
-              onClick={() => void handleBindFile()}
-              style={{
-                padding: '4px 10px',
-                fontSize: 12,
-                cursor: 'pointer',
-                background: '#0284c7',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 4,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              绑定文件
-            </button>
+          <div style={{ marginBottom: space.md }}>
+            <Button variant="primary" size="sm" onClick={() => void handleBindFile()}>
+              {t('sidepanel.bindFile')}
+            </Button>
           </div>
           {boundFiles.length === 0 ? (
-            <div style={{ color: '#64748b', fontSize: 11 }}>
-              尚未绑定文件。绑定后模型可通过文件名读取和写入该文件。
+            <div style={{ color: color.textMuted, fontSize: fontSize.xs }}>
+              {t('sidepanel.noFiles')}
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: space.xs }}>
               {boundFiles.map((file) => (
                 <div
                   key={file.name}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 6,
+                    gap: space.sm,
                     padding: '4px 6px',
-                    background: '#fff',
-                    border: '1px solid #e0f2fe',
-                    borderRadius: 4,
+                    background: color.surface,
+                    border: `1px solid ${color.infoBorder}`,
+                    borderRadius: radius.sm,
                   }}
                 >
-                  <span style={{ color: '#0369a1', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {file.name}（{formatFileSize(file.size)}）
-                  </span>
-                  <button
-                    onClick={() => void handleUnbindFile(file.name)}
+                  <span
                     style={{
-                      padding: '2px 6px',
-                      fontSize: 11,
-                      cursor: 'pointer',
-                      background: 'transparent',
-                      color: '#dc2626',
-                      border: '1px solid #fecaca',
-                      borderRadius: 3,
+                      color: color.infoText,
+                      flex: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
                     }}
                   >
-                    解绑
-                  </button>
+                    {file.name}（{formatFileSize(file.size)}）
+                  </span>
+                  <Button
+                    variant="danger"
+                    size="xs"
+                    onClick={() => void handleUnbindFile(file.name)}
+                  >
+                    {t('sidepanel.unbind')}
+                  </Button>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </Alert>
       )}
 
       {banner && (
-        <div
-          style={{
-            padding: '8px 14px',
-            fontSize: 12,
-            lineHeight: 1.6,
-            background: '#fef2f2',
-            color: '#b91c1c',
-            borderBottom: '1px solid #fecaca',
-            wordBreak: 'break-word',
-          }}
-        >
+        <Alert tone="error" flush style={{ padding: '8px 14px' }}>
           {banner}
           {pendingPageOrigin && (
-            <div style={{ marginTop: 6 }}>
-              <button
-                onClick={() => void handleGrantPagePermission()}
+            <div style={{ marginTop: space.sm }}>
+              <Button
+                size="sm"
                 style={{
-                  padding: '4px 10px',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                  background: '#b91c1c',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 4,
+                  background: color.danger,
+                  color: color.textInverse,
+                  borderColor: 'transparent',
                 }}
+                onClick={() => void handleGrantPagePermission()}
               >
-                授权当前站点
-              </button>
+                {t('sidepanel.grantSite')}
+              </Button>
             </div>
           )}
-        </div>
+        </Alert>
       )}
 
       {interruptedCheckpoint && !generating && (
-        <div
+        <Alert
+          tone="warning"
+          flush
           style={{
             padding: '8px 14px',
-            fontSize: 12,
-            lineHeight: 1.6,
-            background: '#fffbeb',
-            color: '#92400e',
-            borderBottom: '1px solid #fde68a',
             display: 'flex',
             alignItems: 'center',
             gap: 10,
           }}
         >
-          上次任务已中断（第 {interruptedCheckpoint.rounds} 轮）。为避免重放副作用步骤，恢复前请重新发送，不自动执行旧动作。
-          <button
-            onClick={() => void handleDismissInterrupted()}
+          <span style={{ flex: 1 }}>
+            {t('sidepanel.checkpointNotice', { rounds: interruptedCheckpoint.rounds })}
+          </span>
+          <Button
+            size="sm"
             style={{
-              padding: '3px 8px',
-              fontSize: 12,
-              cursor: 'pointer',
-              background: '#f59e0b',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 4,
-              marginLeft: 'auto',
+              background: color.warning,
+              color: color.textInverse,
+              borderColor: 'transparent',
             }}
+            onClick={() => void handleDismissInterrupted()}
           >
-            清除
-          </button>
-        </div>
+            {t('sidepanel.dismiss')}
+          </Button>
+        </Alert>
       )}
 
       {pendingConfirmation && (
-        <div
-          style={{
-            padding: '10px 14px',
-            fontSize: 12,
-            lineHeight: 1.6,
-            background: '#fff7ed',
-            color: '#9a3412',
-            borderBottom: '1px solid #fed7aa',
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            等待确认：<span style={{ fontFamily: 'monospace' }}>{pendingConfirmation.toolName}</span>
+        <Alert tone="warning" flush style={{ padding: '10px 14px' }}>
+          <div style={{ fontWeight: 600, marginBottom: space.sm }}>
+            {t('sidepanel.awaitingConfirmation')}
+            <span style={{ fontFamily: 'monospace' }}>{pendingConfirmation.toolName}</span>
           </div>
           <div
             style={{
-              background: '#fff',
-              border: '1px solid #fed7aa',
+              background: color.surface,
+              border: `1px solid ${color.warningBorder}`,
               borderRadius: 4,
               padding: '6px 8px',
-              marginBottom: 8,
+              marginBottom: space.md,
               wordBreak: 'break-all',
-              color: '#6b7280',
+              color: color.textMuted,
             }}
           >
             {pendingConfirmation.argsPreview}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
+          <div style={{ display: 'flex', gap: space.md }}>
+            <Button
+              size="sm"
+              style={{
+                background: color.success,
+                color: color.textInverse,
+                borderColor: 'transparent',
+              }}
               onClick={handleConfirmAction}
-              style={{
-                padding: '5px 12px',
-                fontSize: 12,
-                cursor: 'pointer',
-                background: '#16a34a',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 4,
-              }}
             >
-              确认执行
-            </button>
-            <button
+              {t('sidepanel.run')}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              style={{ color: color.warningText, borderColor: color.warningBorder }}
               onClick={handleDenyAction}
-              style={{
-                padding: '5px 12px',
-                fontSize: 12,
-                cursor: 'pointer',
-                background: '#fff',
-                color: '#9a3412',
-                border: '1px solid #fdba74',
-                borderRadius: 4,
-              }}
             >
-              拒绝
-            </button>
+              {t('sidepanel.deny')}
+            </Button>
           </div>
-        </div>
+        </Alert>
       )}
 
-      <main style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
-        {view === 'history' && activeSessionId ? (
-          <TaskHistory sessionId={activeSessionId} />
-        ) : loading ? (
-          <p style={{ color: '#9ca3af', fontSize: 12 }}>加载中…</p>
-        ) : !provider ? (
-          <div style={{ textAlign: 'center', color: '#4b5563', marginTop: 40 }}>
-            <p style={{ margin: 0 }}>尚未配置模型供应商</p>
-            <button
-              onClick={openOptions}
-              style={{
-                marginTop: 12,
-                padding: '7px 14px',
-                fontSize: 13,
-                cursor: 'pointer',
-                background: '#2563eb',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 6,
-              }}
-            >
-              前往设置
-            </button>
-          </div>
-        ) : messages.length === 0 ? (
-          <p style={{ color: '#9ca3af', fontSize: 12 }}>输入问题开始对话。</p>
-        ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: message.role === 'user' ? 'flex-end' : 'flex-start',
-                marginBottom: 10,
-              }}
-            >
-              {/* 工具调用事件：默认收起显示 name / 状态 / 耗时，点击展开 args 与 summary，
-                  且排在回复文本之前 —— 用户先看到模型做了什么，再看到最终答复 */}
-              {message.role === 'assistant' &&
-                message.toolEvents &&
-                message.toolEvents.length > 0 && (
+      {/* 内容区：对话栏与任务记录叠放在同一区域，用 transform 左右滑动切换 */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+        {/* 对话栏：默认显示，展开任务记录时整体向左滑出 */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            background: color.surface,
+            transform: view === 'history' ? 'translateX(-100%)' : 'translateX(0)',
+            transition: 'transform 240ms ease',
+          }}
+        >
+          {/* 消息区单独成层，侧拉按钮以此为基准垂直居中，不因输入框而偏移 */}
+          <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
+            <main style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
+              {loading ? (
+                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
+                  {t('common.loading')}
+                </p>
+              ) : !provider ? (
+                <div
+                  style={{ textAlign: 'center', color: color.textSecondary, marginTop: 40 }}
+                >
+                  <p style={{ margin: 0 }}>{t('sidepanel.noProviderTitle')}</p>
+                  <Button
+                    variant="primary"
+                    style={{ marginTop: space.lg }}
+                    onClick={openOptions}
+                  >
+                    {t('sidepanel.openSettings')}
+                  </Button>
+                </div>
+              ) : messages.length === 0 ? (
+                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
+                  {t('sidepanel.emptyChat')}
+                </p>
+              ) : (
+                messages.map((message) => (
                   <div
+                    key={message.id}
                     style={{
-                      maxWidth: '92%',
-                      width: '100%',
-                      marginBottom: 4,
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: 4,
+                      alignItems: message.role === 'user' ? 'flex-end' : 'flex-start',
+                      marginBottom: 10,
                     }}
                   >
-                    {message.toolEvents.map((event) => {
-                      const expanded = expandedToolEvents.has(event.id)
-                      const statusColor =
-                        event.status === 'error'
-                          ? '#b91c1c'
-                          : event.status === 'awaiting_confirmation'
-                            ? '#d97706'
-                            : event.status === 'running'
-                              ? '#9ca3af'
-                              : '#047857'
-                      const statusText =
-                        event.status === 'awaiting_confirmation'
-                          ? '等待确认'
-                          : event.status === 'running'
-                            ? '执行中'
-                            : event.status === 'success'
-                              ? '成功'
-                              : '失败'
-                      return (
+                    {/* 工具调用事件：默认收起显示名称/状态/耗时，点击展开参数与摘要，
+                        且排在回复文本之前 —— 用户先看到模型做了什么，再看到最终答复 */}
+                    {message.role === 'assistant' &&
+                      message.toolEvents &&
+                      message.toolEvents.length > 0 && (
                         <div
-                          key={event.id}
                           style={{
-                            fontSize: 11,
-                            color: '#4b5563',
-                            background: '#f9fafb',
-                            border: '1px solid #e5e7eb',
-                            borderRadius: 6,
+                            maxWidth: '92%',
+                            width: '100%',
+                            marginBottom: 4,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 4,
                           }}
                         >
-                          <button
-                            type="button"
-                            onClick={() => toggleToolEvent(event.id)}
-                            style={{
-                              width: '100%',
-                              textAlign: 'left',
-                              padding: '6px 10px',
-                              border: 'none',
-                              borderRadius: 6,
-                              cursor: 'pointer',
-                              background: 'transparent',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              fontFamily: 'inherit',
-                              color: 'inherit',
-                              fontSize: 'inherit',
-                            }}
-                          >
-                            <span style={{ color: '#9ca3af' }}>
-                              {expanded ? '▾' : '▸'}
-                            </span>
-                            <span style={{ fontFamily: 'monospace' }}>
-                              {event.name}
-                            </span>
-                            <span
-                              style={{
-                                color: statusColor,
-                                fontWeight: 500,
-                              }}
-                            >
-                              {statusText}
-                            </span>
-                            {typeof event.durationMs === 'number' && (
-                              <span style={{ color: '#9ca3af' }}>
-                                {event.durationMs}ms
-                              </span>
-                            )}
-                          </button>
-                          {expanded && (
-                            <div
-                              style={{
-                                padding: '0 10px 8px 26px',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: 4,
-                              }}
-                            >
-                              {event.argsPreview && (
-                                <div
-                                  style={{
-                                    color: '#6b7280',
-                                    wordBreak: 'break-all',
-                                    fontSize: 11,
-                                  }}
-                                >
-                                  {event.argsPreview}
-                                </div>
-                              )}
-                              {event.summary && (
-                                <div
-                                  style={{
-                                    color:
-                                      event.status === 'error' ? '#b91c1c' : '#374151',
-                                    fontSize: 11,
-                                    lineHeight: 1.55,
-                                  }}
-                                >
-                                  {event.summary}
-                                </div>
-                              )}
-                              {event.errorCode && (
-                                <div
-                                  style={{
-                                    color: '#b91c1c',
-                                    fontSize: 11,
-                                  }}
-                                >
-                                  错误码：{event.errorCode}
-                                </div>
-                              )}
-                            </div>
-                          )}
+                          {message.toolEvents.map((event) => (
+                            <ToolEventItem
+                              key={event.id}
+                              event={event}
+                              expanded={expandedToolEvents.has(event.id)}
+                              onToggle={() => toggleToolEvent(event.id)}
+                            />
+                          ))}
                         </div>
-                      )
-                    })}
-                  </div>
-                )}
+                      )}
 
+                    <MessageBubble
+                      role={message.role}
+                      content={message.content}
+                      status={message.status}
+                      error={message.error}
+                    />
+                  </div>
+                ))
+              )}
+              <div ref={bottomRef} />
+            </main>
+            <PullTab
+              label={t('sidepanel.tasks')}
+              disabled={!activeSessionId}
+              onClick={() => setView('history')}
+            />
+          </div>
+
+          <footer style={{ padding: 10, borderTop: `1px solid ${color.border}` }}>
+            {/* 输入区整体容器：上方真实输入框，下方单独一行放模型选择、权限选择和发送按钮 */}
+            <div
+              style={{
+                borderRadius: radius.lg,
+                background: provider ? color.surface : color.surfaceMuted,
+                overflow: 'hidden',
+              }}
+            >
+              <TextArea
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  provider
+                    ? t('sidepanel.inputPlaceholder')
+                    : t('sidepanel.inputPlaceholderNoProvider')
+                }
+                disabled={!provider || loading}
+                rows={3}
+                style={{
+                  display: 'block',
+                  border: 'none',
+                  borderRadius: 0,
+                  outline: 'none',
+                  background: 'transparent',
+                  padding: '4px 8px',
+                  maxHeight: 140,
+                  overflowY: 'auto',
+                  lineHeight: 1.4,
+                }}
+              />
               <div
                 style={{
-                  maxWidth: '88%',
-                  padding: '8px 11px',
-                  borderRadius: 8,
-                  fontSize: 13,
-                  lineHeight: 1.65,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  background:
-                    message.role === 'user'
-                      ? '#2563eb'
-                      : message.status === 'error'
-                        ? '#fef2f2'
-                        : '#f3f4f6',
-                  color: message.role === 'user' ? '#fff' : '#111827',
-                  border:
-                    message.role === 'assistant' && message.status === 'error'
-                      ? '1px solid #fecaca'
-                      : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: space.md,
+                  padding: '6px 8px',
+                  borderTop: `1px solid ${color.borderMuted}`,
                 }}
               >
-                {message.content}
-                {message.status === 'streaming' &&
-                  (message.content ? (
-                    <span style={{ color: '#9ca3af' }}> ▍</span>
-                  ) : (
-                    <span style={{ color: '#9ca3af' }}>正在生成…</span>
-                  ))}
-                {message.status === 'cancelled' && (
-                  <span style={{ color: '#9ca3af', fontSize: 11 }}>（已取消）</span>
-                )}
-                {message.status === 'error' && (
-                  <span style={{ color: '#b91c1c', fontSize: 11 }}>
-                    {message.content ? ' ' : ''}
-                    {message.error ?? '生成失败'}
+                {providers.length > 0 ? (
+                  <ModelPicker
+                    providers={providers}
+                    value={provider?.id ?? ''}
+                    disabled={generating}
+                    onChange={handleProviderChange}
+                  />
+                ) : (
+                  <span style={{ flex: 1, fontSize: 11, color: color.textFaint }}>
+                    {t('sidepanel.noProvider')}
                   </span>
+                )}
+                <Select
+                  size="sm"
+                  block={false}
+                  value={skipConfirm ? 'skip' : 'confirm'}
+                  onChange={(event) => {
+                    if ((event.target.value === 'skip') === skipConfirm) return
+                    void handleToggleSkipConfirm()
+                  }}
+                  title={
+                    skipConfirm
+                      ? t('sidepanel.autoModeOnTitle')
+                      : t('sidepanel.autoModeOffTitle')
+                  }
+                  options={[
+                    { value: 'confirm', label: t('sidepanel.confirmMode') },
+                    { value: 'skip', label: t('sidepanel.autoMode') },
+                  ]}
+                  style={{
+                    flex: 'none',
+                    width: 96,
+                    minWidth: 0,
+                    border: 'none',
+                    appearance: 'none',
+                    background: color.surfaceSubtle,
+                    color: skipConfirm ? color.warning : color.textSecondary,
+                  }}
+                />
+                {provider && (
+                  <span
+                    style={{
+                      flex: 'none',
+                      fontSize: 11,
+                      color: color.textFaint,
+                    }}
+                  >
+                    {provider.supportsStreaming
+                      ? t('sidepanel.streaming')
+                      : t('sidepanel.nonStreaming')}
+                  </span>
+                )}
+                {generating ? (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    style={{ marginLeft: 'auto' }}
+                    onClick={handleStop}
+                  >
+                    {t('sidepanel.stop')}
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={!canSend}
+                    style={{ marginLeft: 'auto' }}
+                    onClick={() => void handleSend()}
+                  >
+                    {t('sidepanel.send')}
+                  </Button>
                 )}
               </div>
             </div>
-          ))
-        )}
-        <div ref={bottomRef} />
-      </main>
-
-      {view === 'chat' && (
-        <footer style={{ padding: 10, borderTop: '1px solid #e5e5e5' }}>
-          <textarea
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={provider ? '输入问题，Enter 发送，Shift+Enter 换行' : '请先配置供应商'}
-            disabled={!provider || loading}
-            rows={3}
-            style={{
-              width: '100%',
-              padding: 8,
-              fontSize: 13,
-              resize: 'none',
-              border: '1px solid #d4d4d4',
-              borderRadius: 6,
-              boxSizing: 'border-box',
-              background: provider ? '#fff' : '#fafafa',
-              fontFamily: 'inherit',
-            }}
-          />
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          {generating ? (
-            <button
-              onClick={handleStop}
-              style={{
-                padding: '6px 14px',
-                fontSize: 13,
-                cursor: 'pointer',
-                background: '#fff',
-                color: '#b91c1c',
-                border: '1px solid #fecaca',
-                borderRadius: 6,
-              }}
-            >
-              停止
-            </button>
-          ) : (
-            <button
-              onClick={() => void handleSend()}
-              disabled={!canSend}
-              style={{
-                padding: '6px 14px',
-                fontSize: 13,
-                cursor: canSend ? 'pointer' : 'not-allowed',
-                background: canSend ? '#2563eb' : '#e5e5e5',
-                color: canSend ? '#fff' : '#9ca3af',
-                border: 'none',
-                borderRadius: 6,
-              }}
-            >
-              发送
-            </button>
-          )}
-          {provider && (
-            <span style={{ fontSize: 11, color: '#9ca3af', alignSelf: 'center' }}>
-              {provider.supportsStreaming ? '流式输出' : '非流式输出'}
-            </span>
-          )}
+          </footer>
         </div>
-        <label
+
+        {/* 任务记录：点击侧拉按钮时从右侧滑入 */}
+        <aside
           style={{
+            position: 'absolute',
+            inset: 0,
             display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            marginTop: 6,
-            fontSize: 11,
-            color: skipConfirm ? '#b91c1c' : '#6b7280',
-            cursor: 'pointer',
-            userSelect: 'none',
+            flexDirection: 'column',
+            background: color.surface,
+            transform: view === 'history' ? 'translateX(0)' : 'translateX(100%)',
+            transition: 'transform 240ms ease',
           }}
         >
-          <input
-            type="checkbox"
-            checked={skipConfirm}
-            onChange={() => void handleToggleSkipConfirm()}
-            style={{ cursor: 'pointer' }}
-          />
-          <span style={{color:'orange'}}>
-            {skipConfirm
-              ? '⚠️ 已开启：全局自动执行风险操作（不再弹窗确认）'
-              : '允许全局自动执行风险操作（默认关闭）'}
-          </span>
-        </label>
-        </footer>
-      )}
+          <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
+            {/* 右侧留出侧拉按钮的宽度，避免列表内容与按钮边框重叠 */}
+            <main style={{ flex: 1, overflowY: 'auto', padding: '12px 32px 12px 14px' }}>
+              {activeSessionId ? (
+                <TaskHistory sessionId={activeSessionId} />
+              ) : (
+                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
+                  {t('sidepanel.noSession')}
+                </p>
+              )}
+            </main>
+            <PullTab
+              label={t('sidepanel.backToChat')}
+              disabled={!activeSessionId}
+              onClick={() => setView('chat')}
+            />
+          </div>
+        </aside>
+      </div>
     </div>
   )
 }
 
-function toolbarButtonStyle(disabled: boolean): CSSProperties {
-  return {
-    padding: '3px 8px',
-    fontSize: 12,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    color: disabled ? '#9ca3af' : '#111827',
-    background: 'transparent',
-    border: '1px solid #d4d4d4',
-    borderRadius: 4,
-  }
+/**
+ * 侧拉按钮：始终贴在内容区右边缘，距顶部的固定偏移量保证两个视图位置的上下一致。
+ */
+function PullTab({
+  label,
+  disabled,
+  onClick,
+}: {
+  label: string
+  disabled: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      style={{
+        position: 'absolute',
+        top: 100,
+        right: 0,
+        zIndex: 5,
+        width: 16,
+        height: 56,
+        padding: 0,
+        borderTop: `1px solid ${color.border}`,
+        borderBottom: `1px solid ${color.border}`,
+        borderLeft: `1px solid ${color.border}`,
+        borderRight: 'none',
+        borderRadius: '6px 0 0 6px',
+        background: color.surfaceMuted,
+        color: disabled ? color.textFaint : color.textMuted,
+        fontFamily: 'inherit',
+        fontSize: 12,
+        lineHeight: 1,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+      }}
+    >
+      ‹
+    </button>
+  )
 }
 
 function describeError(error: unknown): string {

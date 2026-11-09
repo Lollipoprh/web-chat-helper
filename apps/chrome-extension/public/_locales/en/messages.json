@@ -1,0 +1,10 @@
+{
+  "extDescription": {
+    "message": "A browser AI assistant built on OpenAI-compatible APIs that can read and operate the current page",
+    "description": "Description shown in the Chrome Web Store and on the extensions page"
+  },
+  "actionTitle": {
+    "message": "Open the Web Chat Helper side panel",
+    "description": "Tooltip for the toolbar button"
+  }
+}

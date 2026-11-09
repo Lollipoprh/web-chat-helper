@@ -7,19 +7,8 @@ import {
   type ProviderDraft,
 } from 'llm-client'
 import { requestOriginPermission } from '../shared/permissions'
-import {
-  cardStyle,
-  dangerButtonStyle,
-  disabledButtonStyle,
-  errorTextStyle,
-  fieldRowStyle,
-  hintStyle,
-  inputStyle,
-  labelStyle,
-  primaryButtonStyle,
-  secondaryButtonStyle,
-  sectionTitleStyle,
-} from './styles'
+import { useI18n } from '../shared/useI18n'
+import { Alert, Button, Card, Checkbox, Field, Input, color, space } from '../ui'
 
 interface ProviderFormProps {
   /** 传入表示编辑，不传表示新增 */
@@ -34,6 +23,7 @@ interface TestFeedback {
 }
 
 export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFormProps) {
+  const { t } = useI18n()
   const [name, setName] = useState(initial?.name ?? '')
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? '')
   const [apiKey, setApiKey] = useState(initial?.apiKey ?? '')
@@ -50,10 +40,10 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
   const parsedEndpoint = baseUrl.trim() ? parseEndpoint(baseUrl) : null
 
   function validateRequired(): string | null {
-    if (!name.trim()) return '请填写供应商名称'
-    if (!baseUrl.trim()) return '请填写 Base URL'
-    if (!apiKey.trim()) return '请填写 API Key'
-    if (!model.trim()) return '请填写 Model'
+    if (!name.trim()) return t('providerForm.errName')
+    if (!baseUrl.trim()) return t('providerForm.errBaseUrl')
+    if (!apiKey.trim()) return t('providerForm.errApiKey')
+    if (!model.trim()) return t('providerForm.errModel')
     return null
   }
 
@@ -67,7 +57,7 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
     if (!parsedEndpoint || !parsedEndpoint.ok) {
       setTestFeedback({
         ok: false,
-        message: parsedEndpoint ? parsedEndpoint.error : '请填写 Base URL',
+        message: parsedEndpoint ? parsedEndpoint.error : t('providerForm.errBaseUrl'),
       })
       return
     }
@@ -77,7 +67,7 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
     if (!granted) {
       setTestFeedback({
         ok: false,
-        message: `未获得 ${parsedEndpoint.endpoint.origin} 的访问权限，无法测试连接`,
+        message: t('providerForm.errPermission', { origin: parsedEndpoint.endpoint.origin }),
       })
       return
     }
@@ -91,7 +81,10 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
     })
     setTestFeedback({
       ok: result.ok,
-      message: `${result.message} · 用时 ${result.durationMs}ms`,
+      message: t('providerForm.testResult', {
+        message: result.message,
+        ms: result.durationMs,
+      }),
     })
     setTesting(false)
   }
@@ -103,7 +96,7 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
       return
     }
     if (!parsedEndpoint || !parsedEndpoint.ok) {
-      setFormError(parsedEndpoint ? parsedEndpoint.error : '请填写 Base URL')
+      setFormError(parsedEndpoint ? parsedEndpoint.error : t('providerForm.errBaseUrl'))
       return
     }
 
@@ -124,157 +117,146 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
   }
 
   return (
-    <section style={{ ...cardStyle, marginTop: 16 }}>
-      <h2 style={sectionTitleStyle}>{initial ? '编辑供应商' : '新增供应商'}</h2>
-
-      <div style={{ marginTop: 16 }}>
-        <div style={fieldRowStyle}>
-          <label style={labelStyle} htmlFor="provider-name">
-            名称
-          </label>
-          <input
-            id="provider-name"
-            style={inputStyle}
+    <Card
+      title={initial ? t('providerForm.editTitle') : t('providerForm.newTitle')}
+      style={{ marginTop: space.xl }}
+    >
+      <div style={{ marginTop: space.xl }}>
+        <Field label={t('providerForm.nameLabel')}>
+          <Input
             value={name}
-            placeholder="例如：公司网关 / 本地模型"
+            placeholder={t('providerForm.namePlaceholder')}
             onChange={(event) => setName(event.target.value)}
           />
-        </div>
+        </Field>
 
-        <div style={fieldRowStyle}>
-          <label style={labelStyle} htmlFor="provider-base-url">
-            Base URL
-          </label>
-          <input
-            id="provider-base-url"
-            style={inputStyle}
+        <Field
+          label="Base URL"
+          hint={
+            <>
+              {t('providerForm.baseUrlHint')}
+              {parsedEndpoint && (
+                <span
+                  style={{
+                    display: 'block',
+                    marginTop: space.xs,
+                    color: parsedEndpoint.ok ? color.textMuted : color.danger,
+                  }}
+                >
+                  {parsedEndpoint.ok
+                    ? t('providerForm.resolvedUrl', {
+                        url: parsedEndpoint.endpoint.chatCompletionsUrl,
+                      })
+                    : parsedEndpoint.error}
+                </span>
+              )}
+            </>
+          }
+        >
+          <Input
             value={baseUrl}
             placeholder="https://api.your-provider.com/v1"
             spellCheck={false}
             onChange={(event) => setBaseUrl(event.target.value)}
           />
-          <p style={hintStyle}>
-            支持根地址、带版本号地址，或完整的 <code>/chat/completions</code> 地址；仅支持
-            HTTPS，本机地址可用 HTTP。
-          </p>
-          {parsedEndpoint && (
-            <p style={parsedEndpoint.ok ? hintStyle : errorTextStyle}>
-              {parsedEndpoint.ok
-                ? `实际请求：${parsedEndpoint.endpoint.chatCompletionsUrl}`
-                : parsedEndpoint.error}
-            </p>
-          )}
-        </div>
+        </Field>
 
-        <div style={fieldRowStyle}>
-          <label style={labelStyle} htmlFor="provider-api-key">
-            API Key
-          </label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
+        <Field
+          label="API Key"
+          htmlFor="provider-api-key"
+          hint={
+            apiKey.trim() && !showKey
+              ? t('providerForm.apiKeyHint', { masked: maskApiKey(apiKey) })
+              : undefined
+          }
+        >
+          <div style={{ display: 'flex', gap: space.md }}>
+            <Input
               id="provider-api-key"
-              style={inputStyle}
               type={showKey ? 'text' : 'password'}
               value={apiKey}
-              placeholder="仅保存在本机浏览器存储中"
+              placeholder={t('providerForm.apiKeyPlaceholder')}
               spellCheck={false}
               autoComplete="off"
               onChange={(event) => setApiKey(event.target.value)}
             />
-            <button
-              type="button"
-              style={{ ...secondaryButtonStyle, whiteSpace: 'nowrap' }}
+            <Button
+              variant="secondary"
+              style={{ whiteSpace: 'nowrap' }}
               onClick={() => setShowKey((value) => !value)}
             >
-              {showKey ? '隐藏' : '显示'}
-            </button>
+              {showKey ? t('providerForm.hideKey') : t('providerForm.showKey')}
+            </Button>
           </div>
-          {apiKey.trim() && !showKey && (
-            <p style={hintStyle}>当前填入：{maskApiKey(apiKey)}</p>
-          )}
-        </div>
+        </Field>
 
-        <div style={fieldRowStyle}>
-          <label style={labelStyle} htmlFor="provider-model">
-            Model
-          </label>
-          <input
-            id="provider-model"
-            style={inputStyle}
+        <Field label="Model">
+          <Input
             value={model}
-            placeholder="填写该服务商提供的模型名"
+            placeholder={t('providerForm.modelPlaceholder')}
             spellCheck={false}
             onChange={(event) => setModel(event.target.value)}
           />
+        </Field>
+
+        <div
+          style={{
+            display: 'flex',
+            gap: space.xxl,
+            marginBottom: space.xl,
+          }}
+        >
+          <Checkbox
+            checked={supportsStreaming}
+            onChange={(event) => setSupportsStreaming(event.target.checked)}
+            label={t('providerForm.supportsStreaming')}
+          />
+          <Checkbox
+            checked={supportsToolCalls}
+            onChange={(event) => setSupportsToolCalls(event.target.checked)}
+            label={t('providerForm.supportsToolCalls')}
+          />
         </div>
 
-        <div style={{ ...fieldRowStyle, display: 'flex', gap: 24 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-            <input
-              type="checkbox"
-              checked={supportsStreaming}
-              onChange={(event) => setSupportsStreaming(event.target.checked)}
-            />
-            支持流式输出
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-            <input
-              type="checkbox"
-              checked={supportsToolCalls}
-              onChange={(event) => setSupportsToolCalls(event.target.checked)}
-            />
-            支持 Tool Calls
-          </label>
-        </div>
-
-        {formError && <p style={errorTextStyle}>{formError}</p>}
-
-        {testFeedback && (
-          <div
-            style={{
-              marginTop: 4,
-              marginBottom: 16,
-              padding: '10px 12px',
-              borderRadius: 6,
-              fontSize: 12,
-              lineHeight: 1.6,
-              background: testFeedback.ok ? '#ecfdf5' : '#fef2f2',
-              color: testFeedback.ok ? '#047857' : '#b91c1c',
-              border: `1px solid ${testFeedback.ok ? '#a7f3d0' : '#fecaca'}`,
-              wordBreak: 'break-word',
-            }}
-          >
-            {testFeedback.message}
-          </div>
+        {formError && (
+          <Alert tone="error" style={{ marginBottom: space.xl }}>
+            {formError}
+          </Alert>
         )}
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-          <button
-            type="button"
-            style={testing || saving ? disabledButtonStyle : primaryButtonStyle}
-            disabled={testing || saving}
-            onClick={handleSubmit}
+        {testFeedback && (
+          <Alert
+            tone={testFeedback.ok ? 'success' : 'error'}
+            style={{ marginTop: space.xs, marginBottom: space.xl }}
           >
-            {saving ? '保存中…' : '保存'}
-          </button>
-          <button
-            type="button"
-            style={testing || saving ? disabledButtonStyle : secondaryButtonStyle}
-            disabled={testing || saving}
-            onClick={handleTest}
+            {testFeedback.message}
+          </Alert>
+        )}
+
+        <div style={{ display: 'flex', gap: space.md, marginTop: space.xs }}>
+          <Button
+            variant="primary"
+            loading={saving}
+            loadingText={t('providerForm.saving')}
+            disabled={testing}
+            onClick={() => void handleSubmit()}
           >
-            {testing ? '测试中…' : '测试连接'}
-          </button>
-          <button
-            type="button"
-            style={dangerButtonStyle}
+            {t('common.save')}
+          </Button>
+          <Button
+            variant="secondary"
+            loading={testing}
+            loadingText={t('providerForm.testing')}
             disabled={saving}
-            onClick={onCancel}
+            onClick={() => void handleTest()}
           >
-            取消
-          </button>
+            {t('providerForm.test')}
+          </Button>
+          <Button variant="danger" disabled={saving} onClick={onCancel}>
+            {t('common.cancel')}
+          </Button>
         </div>
       </div>
-    </section>
+    </Card>
   )
 }

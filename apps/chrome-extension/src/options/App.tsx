@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DEFAULT_AGENT_LIMITS, type AgentLimits } from 'agent-core'
 import {
   createProviderId,
@@ -26,20 +26,25 @@ import {
   type LogStats,
 } from '../shared/step-log-storage'
 import ProviderForm from './ProviderForm'
+import { contentStyle, shellStyle, sidebarHeaderStyle, sidebarStyle } from './styles'
+import { LANG_PREF_VALUES, type LangPref } from '../shared/i18n'
+import { langDisplayName, useI18n, type I18n } from '../shared/useI18n'
 import {
-  badgeStyle,
-  cardStyle,
-  dangerButtonStyle,
-  fieldRowStyle,
-  hintStyle,
-  inputStyle,
-  labelStyle,
-  primaryButtonStyle,
-  secondaryButtonStyle,
-  sectionTitleStyle,
-} from './styles'
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Field,
+  Input,
+  PageHeader,
+  Select,
+  color,
+  fontSize,
+  fontWeight,
+  space,
+} from '../ui'
 
-type MenuKey = 'providers' | 'limits' | 'logs'
+type MenuKey = 'providers' | 'limits' | 'logs' | 'general'
 
 interface MenuItem {
   key: MenuKey
@@ -47,15 +52,31 @@ interface MenuItem {
   desc: string
 }
 
-const MENU: MenuItem[] = [
-  { key: 'providers', label: '供应商', desc: '模型接口与密钥' },
-  { key: 'limits', label: '工具限额', desc: '轮次、超时等上限' },
-  { key: 'logs', label: '运行日志', desc: '本地任务记录' },
-]
-
 export default function App() {
+  const { t, lang, pref, setPref } = useI18n()
+  // 只在挂载时读取一次的 effect 用 ref 取 t，避免切换语言触发重新拉取、覆盖未保存的表单
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
   const [activeMenu, setActiveMenu] = useState<MenuKey>('providers')
   const [storageError, setStorageError] = useState<string | null>(null)
+
+  // 语言放在最后一项：常用配置优先，语言属于一次性设置
+  const menu: MenuItem[] = useMemo(
+    () => [
+      { key: 'providers', label: t('options.navProviders'), desc: t('options.navProvidersDesc') },
+      { key: 'limits', label: t('options.navLimits'), desc: t('options.navLimitsDesc') },
+      { key: 'logs', label: t('options.navLogs'), desc: t('options.navLogsDesc') },
+      { key: 'general', label: t('options.navGeneral'), desc: t('options.navGeneralDesc') },
+    ],
+    [t],
+  )
+
+  // 浏览器标签页标题跟随界面语言
+  useEffect(() => {
+    document.title = `Web Chat Helper · ${t('common.settings')}`
+  }, [t])
 
   // —— 供应商
   const [providers, setProviders] = useState<ProviderConfig[]>([])
@@ -92,7 +113,9 @@ export default function App() {
       setDefaultId(effectiveDefault)
       setStorageError(null)
     } catch (error) {
-      setStorageError(`读取配置失败：${describeError(error)}`)
+      setStorageError(
+        tRef.current('options.loadProvidersFailed', { message: describeError(error) }),
+      )
     } finally {
       setProvidersLoading(false)
     }
@@ -104,7 +127,9 @@ export default function App() {
       setLimits(next)
       setLimitsError(null)
     } catch (error) {
-      setLimitsError(`读取限额失败：${describeError(error)}`)
+      setLimitsError(
+        tRef.current('options.loadLimitsFailed', { message: describeError(error) }),
+      )
     } finally {
       setLimitsLoading(false)
     }
@@ -141,7 +166,7 @@ export default function App() {
     try {
       await saveProvider(provider)
     } catch (error) {
-      setStorageError(`保存失败：${describeError(error)}`)
+      setStorageError(t('options.saveFailed', { message: describeError(error) }))
       return
     }
 
@@ -151,15 +176,13 @@ export default function App() {
   }
 
   async function handleDelete(provider: ProviderConfig) {
-    const confirmed = window.confirm(
-      `确定删除「${provider.name}」吗？该操作不可撤销。`,
-    )
+    const confirmed = window.confirm(t('options.confirmDeleteProvider', { name: provider.name }))
     if (!confirmed) return
 
     try {
       await deleteProvider(provider.id)
     } catch (error) {
-      setStorageError(`删除失败：${describeError(error)}`)
+      setStorageError(t('options.deleteFailed', { message: describeError(error) }))
       return
     }
 
@@ -173,25 +196,25 @@ export default function App() {
       setDefaultId(provider.id)
       setStorageError(null)
     } catch (error) {
-      setStorageError(`设置默认供应商失败：${describeError(error)}`)
+      setStorageError(t('options.setDefaultFailed', { message: describeError(error) }))
     }
   }
 
   async function handleClearLogs() {
-    const confirmed = window.confirm('确定清空全部本地运行日志吗？该操作不可撤销。')
+    const confirmed = window.confirm(t('options.confirmClearLogs'))
     if (!confirmed) return
 
     try {
       await clearAllLogs()
       await refreshLogStats()
     } catch (error) {
-      setStorageError(`清空日志失败：${describeError(error)}`)
+      setStorageError(t('options.clearLogsFailed', { message: describeError(error) }))
     }
   }
 
   // —— 限额事件
 
-  const validateLimits = useMemo(() => validate(limits), [limits])
+  const validateLimits = useMemo(() => validate(limits, t), [limits, t])
 
   async function handleSaveLimits() {
     if (!validateLimits.valid) {
@@ -203,13 +226,17 @@ export default function App() {
       setLimitsSavedAt(Date.now())
       setLimitsError(null)
     } catch (error) {
-      setLimitsError(`保存限额失败：${describeError(error)}`)
+      setLimitsError(t('options.saveLimitsFailed', { message: describeError(error) }))
     }
   }
 
   async function handleResetLimits() {
     const ok = window.confirm(
-      `确定恢复到默认值？\n\nmaxRounds: ${DEFAULT_AGENT_LIMITS.maxRounds} 轮\ntoolTimeoutMs: ${DEFAULT_AGENT_LIMITS.toolTimeoutMs} ms\nrequestTimeoutMs: ${DEFAULT_AGENT_LIMITS.requestTimeoutMs} ms`,
+      t('options.confirmResetLimits', {
+        rounds: DEFAULT_AGENT_LIMITS.maxRounds,
+        toolTimeout: DEFAULT_AGENT_LIMITS.toolTimeoutMs,
+        requestTimeout: DEFAULT_AGENT_LIMITS.requestTimeoutMs,
+      }),
     )
     if (!ok) return
     await resetAgentLimits()
@@ -236,44 +263,41 @@ export default function App() {
     <div style={shellStyle}>
       <aside style={sidebarStyle}>
         <div style={sidebarHeaderStyle}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: '#111827' }}>
-            Web Chat Helper
+          <div style={{ fontSize: fontSize.xs, color: color.textFaint, marginTop: 2 }}>
+            {t('common.settings')}
           </div>
-          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>设置</div>
         </div>
-        <nav style={{ marginTop: 12 }}>
-          {MENU.map((item) => {
+        <nav style={{ marginTop: space.lg }}>
+          {menu.map((item) => {
             const active = item.key === activeMenu
             return (
-              <button
+              <Button
                 key={item.key}
-                type="button"
+                variant={active ? 'subtle' : 'text'}
+                block
                 onClick={() => setActiveMenu(item.key)}
                 style={{
                   display: 'block',
-                  width: '100%',
                   textAlign: 'left',
                   padding: '10px 12px',
-                  marginBottom: 4,
+                  marginBottom: space.xs,
                   border: 'none',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  background: active ? '#eff6ff' : 'transparent',
-                  color: active ? '#1d4ed8' : '#374151',
-                  fontFamily: 'inherit',
+                  color: active ? color.primarySoftText : color.textSecondary,
                 }}
               >
-                <div style={{ fontSize: 13, fontWeight: 500 }}>{item.label}</div>
+                <div style={{ fontSize: fontSize.md, fontWeight: fontWeight.medium }}>
+                  {item.label}
+                </div>
                 <div
                   style={{
-                    fontSize: 11,
-                    color: active ? '#3b82f6' : '#9ca3af',
+                    fontSize: fontSize.xs,
+                    color: active ? color.primary : color.textFaint,
                     marginTop: 1,
                   }}
                 >
                   {item.desc}
                 </div>
-              </button>
+              </Button>
             )
           })}
         </nav>
@@ -281,7 +305,9 @@ export default function App() {
 
       <main style={contentStyle}>
         {storageError && (
-          <div style={errorBannerStyle}>{storageError}</div>
+          <Alert tone="error" style={{ marginBottom: space.xl }}>
+            {storageError}
+          </Alert>
         )}
 
         {activeMenu === 'providers' && (
@@ -321,10 +347,19 @@ export default function App() {
           />
         )}
 
-        <footer style={{ marginTop: 28, paddingTop: 16, borderTop: '1px solid #e5e7eb' }}>
-          <p style={hintStyle}>
-            说明：API Key 保存在 <code>chrome.storage.local</code>，并非操作系统级密钥保险库，
-            仅供个人本机使用。运行日志与会话消息存放在 IndexedDB，与配置存储相互隔离。
+        {activeMenu === 'general' && (
+          <GeneralPanel pref={pref} currentLang={lang} onPrefChange={setPref} />
+        )}
+
+        <footer
+          style={{
+            marginTop: 28,
+            paddingTop: 16,
+            borderTop: `1px solid ${color.border}`,
+          }}
+        >
+          <p style={{ margin: 0, fontSize: fontSize.sm, color: color.textMuted, lineHeight: 1.6 }}>
+            {t('options.footerNote')}
           </p>
         </footer>
       </main>
@@ -349,45 +384,37 @@ interface ProvidersPanelProps {
 }
 
 function ProvidersPanel(props: ProvidersPanelProps) {
+  const { t } = useI18n()
+
   return (
     <>
-      <header style={{ marginBottom: 24 }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: '#111827' }}>
-          供应商
-        </h1>
-        <p style={{ margin: '8px 0 0', color: '#6b7280', fontSize: 13 }}>
-          配置 OpenAI 兼容的模型供应商。所有配置只保存在本机浏览器中，不会上传。
-        </p>
-      </header>
+      <PageHeader
+        title={t('options.providersTitle')}
+        description={t('options.providersDesc')}
+      />
 
-      <section style={cardStyle}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 12,
-          }}
-        >
-          <h2 style={sectionTitleStyle}>供应商列表</h2>
-          <button
-            type="button"
-            style={primaryButtonStyle}
+      <Card
+        title={t('options.providerListTitle')}
+        extra={
+          <Button
+            variant="primary"
             onClick={() => {
               props.setEditing(null)
               props.setCreating(true)
             }}
           >
-            新增供应商
-          </button>
-        </div>
-
-        <div style={{ marginTop: 16 }}>
+            {t('options.addProvider')}
+          </Button>
+        }
+      >
+        <div style={{ marginTop: space.xl }}>
           {props.loading ? (
-            <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>加载中…</p>
+            <p style={{ color: color.textMuted, fontSize: fontSize.md, margin: 0 }}>
+              {t('common.loading')}
+            </p>
           ) : props.providers.length === 0 ? (
-            <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>
-              尚未配置任何供应商。至少添加一个并设为默认，侧边栏才能发起对话。
+            <p style={{ color: color.textMuted, fontSize: fontSize.md, margin: 0 }}>
+              {t('options.providersEmpty')}
             </p>
           ) : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
@@ -401,62 +428,74 @@ function ProvidersPanel(props: ProvidersPanelProps) {
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'flex-start',
-                      gap: 12,
+                      gap: space.lg,
                       padding: '14px 0',
-                      borderTop: '1px solid #f3f4f6',
+                      borderTop: `1px solid ${color.borderMuted}`,
                     }}
                   >
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
+                      <div
+                        style={{
+                          fontSize: fontSize.lg,
+                          fontWeight: fontWeight.semibold,
+                          color: color.text,
+                        }}
+                      >
                         {provider.name}
-                        {isDefault && <span style={badgeStyle}>默认</span>}
+                        {isDefault && <Badge>{t('options.defaultBadge')}</Badge>}
                       </div>
-                      <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                        模型 {provider.model} · 密钥 {maskApiKey(provider.apiKey)}
+                      <div
+                        style={{ fontSize: fontSize.sm, color: color.textMuted, marginTop: space.xs }}
+                      >
+                        {t('options.providerMeta', {
+                          model: provider.model,
+                          key: maskApiKey(provider.apiKey),
+                        })}
                       </div>
                       <div
                         style={{
-                          fontSize: 12,
-                          color: '#9ca3af',
+                          fontSize: fontSize.sm,
+                          color: color.textFaint,
                           marginTop: 2,
                           wordBreak: 'break-all',
                         }}
                       >
                         {endpoint.ok ? endpoint.endpoint.chatCompletionsUrl : provider.baseUrl}
                       </div>
-                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
-                        {provider.supportsStreaming ? '流式' : '非流式'} ·{' '}
-                        {provider.supportsToolCalls ? '支持 Tool Calls' : '不支持 Tool Calls'}
+                      <div
+                        style={{ fontSize: fontSize.xs, color: color.textFaint, marginTop: space.xs }}
+                      >
+                        {provider.supportsStreaming
+                          ? t('options.streaming')
+                          : t('options.nonStreaming')}{' '}
+                        ·{' '}
+                        {provider.supportsToolCalls
+                          ? t('options.toolCallsSupported')
+                          : t('options.toolCallsUnsupported')}
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <div style={{ display: 'flex', gap: space.sm, flexShrink: 0 }}>
                       {!isDefault && (
-                        <button
-                          type="button"
-                          style={secondaryButtonStyle}
+                        <Button
+                          variant="secondary"
                           onClick={() => void props.onSetDefault(provider)}
                         >
-                          设为默认
-                        </button>
+                          {t('options.setDefault')}
+                        </Button>
                       )}
-                      <button
-                        type="button"
-                        style={secondaryButtonStyle}
+                      <Button
+                        variant="secondary"
                         onClick={() => {
                           props.setCreating(false)
                           props.setEditing(provider)
                         }}
                       >
-                        编辑
-                      </button>
-                      <button
-                        type="button"
-                        style={dangerButtonStyle}
-                        onClick={() => void props.onDelete(provider)}
-                      >
-                        删除
-                      </button>
+                        {t('common.edit')}
+                      </Button>
+                      <Button variant="danger" onClick={() => void props.onDelete(provider)}>
+                        {t('common.delete')}
+                      </Button>
                     </div>
                   </li>
                 )
@@ -464,7 +503,7 @@ function ProvidersPanel(props: ProvidersPanelProps) {
             </ul>
           )}
         </div>
-      </section>
+      </Card>
 
       {(props.creating || props.editing) && (
         <ProviderForm
@@ -494,107 +533,102 @@ interface LimitsPanelProps {
 }
 
 function LimitsPanel(props: LimitsPanelProps) {
-  const rowStyle = fieldRowStyle
-  const hint = (text: string) => (
-    <p style={{ margin: '4px 0 0', fontSize: 12, color: '#6b7280', lineHeight: 1.6 }}>
-      {text}
-    </p>
-  )
+  const { t } = useI18n()
+
   return (
     <>
-      <header style={{ marginBottom: 24 }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: '#111827' }}>
-          工具限额
-        </h1>
-        <p style={{ margin: '8px 0 0', color: '#6b7280', fontSize: 13 }}>
-          应用级默认值。设置后，所有新发起的 Side Panel 对话都会使用这里的限额。
-        </p>
-      </header>
+      <PageHeader title={t('options.limitsTitle')} description={t('options.limitsDesc')} />
 
-      <section style={cardStyle}>
+      <Card>
         {props.loading ? (
-          <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>加载中…</p>
+          <p style={{ color: color.textMuted, fontSize: fontSize.md, margin: 0 }}>
+            {t('common.loading')}
+          </p>
         ) : (
           <>
-            <div style={rowStyle}>
-              <label htmlFor="lim-maxRounds" style={labelStyle}>
-                最大工具调用轮次（maxRounds）
-              </label>
-              <input
-                id="lim-maxRounds"
+            <Field
+              label={t('options.maxRoundsLabel')}
+              hint={t('options.maxRoundsHint', { default: DEFAULT_AGENT_LIMITS.maxRounds })}
+            >
+              <Input
                 type="number"
                 min={1}
                 max={100}
                 value={props.limits.maxRounds}
                 onChange={(e) => props.onUpdate('maxRounds', e.target.value)}
-                style={inputStyle}
               />
-              {hint(
-                `模型最多执行 N 轮 "模型返回 → 工具调用"。超出即停止，避免死循环。默认 ${DEFAULT_AGENT_LIMITS.maxRounds}。`,
-              )}
-            </div>
+            </Field>
 
-            <div style={rowStyle}>
-              <label htmlFor="lim-toolTimeout" style={labelStyle}>
-                单工具执行超时（toolTimeoutMs，毫秒）
-              </label>
-              <input
-                id="lim-toolTimeout"
+            <Field
+              label={t('options.toolTimeoutLabel')}
+              hint={t('options.toolTimeoutHint', {
+                default: DEFAULT_AGENT_LIMITS.toolTimeoutMs.toLocaleString(),
+              })}
+            >
+              <Input
                 type="number"
                 min={1000}
                 step={1000}
                 value={props.limits.toolTimeoutMs}
                 onChange={(e) => props.onUpdate('toolTimeoutMs', e.target.value)}
-                style={inputStyle}
               />
-              {hint(
-                `单次工具调用（点击、输入等）最长等待时间。超时视为该步失败。默认 ${DEFAULT_AGENT_LIMITS.toolTimeoutMs.toLocaleString()} ms。`,
-              )}
-            </div>
+            </Field>
 
-            <div style={rowStyle}>
-              <label htmlFor="lim-requestTimeout" style={labelStyle}>
-                模型请求超时（requestTimeoutMs，毫秒）
-              </label>
-              <input
-                id="lim-requestTimeout"
+            <Field
+              label={t('options.requestTimeoutLabel')}
+              hint={t('options.requestTimeoutHint', {
+                default: DEFAULT_AGENT_LIMITS.requestTimeoutMs.toLocaleString(),
+              })}
+            >
+              <Input
                 type="number"
                 min={5000}
                 step={1000}
                 value={props.limits.requestTimeoutMs}
                 onChange={(e) => props.onUpdate('requestTimeoutMs', e.target.value)}
-                style={inputStyle}
               />
-              {hint(
-                `单次 Chat Completions 请求的最长等待时间（流式与非流式通用）。默认 ${DEFAULT_AGENT_LIMITS.requestTimeoutMs.toLocaleString()} ms。`,
-              )}
-            </div>
+            </Field>
 
             {props.error && (
-              <div style={{ ...errorBannerStyle, marginTop: 12 }}>{props.error}</div>
+              <Alert tone="error" style={{ marginTop: space.lg }}>
+                {props.error}
+              </Alert>
             )}
             {!props.valid && !props.error && (
-              <div style={{ marginTop: 12, fontSize: 12, color: '#b91c1c' }}>
+              <p
+                style={{
+                  marginTop: space.lg,
+                  fontSize: fontSize.sm,
+                  color: color.danger,
+                }}
+              >
                 {props.validationMessage}
-              </div>
+              </p>
             )}
 
-            <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
-              <button type="button" style={primaryButtonStyle} onClick={props.onSave}>
-                保存
-              </button>
-              <button type="button" style={secondaryButtonStyle} onClick={props.onReset}>
-                恢复默认
-              </button>
+            <div
+              style={{
+                display: 'flex',
+                gap: space.md,
+                marginTop: space.lg,
+                alignItems: 'center',
+              }}
+            >
+              <Button variant="primary" onClick={props.onSave}>
+                {t('common.save')}
+              </Button>
+              <Button variant="secondary" onClick={props.onReset}>
+                {t('options.reset')}
+              </Button>
               {props.savedAt && (
-                <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 8 }}>
-                  已保存于 {formatTime(props.savedAt)}
+                <span style={{ fontSize: fontSize.xs, color: color.textMuted, marginLeft: space.md }}>
+                  {t('options.savedAt', { time: formatTime(props.savedAt) })}
                 </span>
               )}
             </div>
           </>
         )}
-      </section>
+      </Card>
     </>
   )
 }
@@ -605,62 +639,105 @@ interface LogsPanelProps {
 }
 
 function LogsPanel(props: LogsPanelProps) {
+  const { t } = useI18n()
+
   return (
     <>
-      <header style={{ marginBottom: 24 }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: '#111827' }}>
-          运行日志
-        </h1>
-        <p style={{ margin: '8px 0 0', color: '#6b7280', fontSize: 13 }}>
-          任务日志保存在本机 IndexedDB，Side Panel 的「任务记录」视图可以按会话检索。
-        </p>
-      </header>
+      <PageHeader title={t('options.logsTitle')} description={t('options.logsDesc')} />
 
-      <section style={cardStyle}>
-        <div
+      <Card
+        title={t('options.logStatsTitle')}
+        extra={
+          <Button variant="danger" onClick={props.onClear}>
+            {t('options.clearLogs')}
+          </Button>
+        }
+      >
+        <p
           style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 12,
+            margin: '12px 0 0',
+            fontSize: fontSize.sm,
+            color: color.textMuted,
+            lineHeight: 1.7,
           }}
         >
-          <h2 style={sectionTitleStyle}>本地日志统计</h2>
-          <button type="button" style={dangerButtonStyle} onClick={props.onClear}>
-            清空日志
-          </button>
-        </div>
-
-        <p style={{ margin: '12px 0 0', fontSize: 12, color: '#6b7280', lineHeight: 1.7 }}>
-          最多保留 {LOG_RETENTION_DAYS} 天或 {LOG_MAX_TASKS} 个任务（先到者为准），到期自动清理。
-          日志只记录脱敏后的工具参数与结果摘要，不含页面正文、表单值、Cookie 与 API Key。
+          {t('options.logsBody', { days: LOG_RETENTION_DAYS, tasks: LOG_MAX_TASKS })}
           {props.logStats
-            ? ` 当前有 ${props.logStats.taskCount} 个任务、${props.logStats.stepCount} 条步骤记录。`
+            ? ` ${t('options.logStats', {
+                tasks: props.logStats.taskCount,
+                steps: props.logStats.stepCount,
+              })}`
             : ''}
         </p>
-      </section>
+      </Card>
+    </>
+  )
+}
+
+interface GeneralPanelProps {
+  pref: LangPref
+  currentLang: 'zh' | 'en'
+  onPrefChange: (pref: LangPref) => Promise<void>
+}
+
+function GeneralPanel({ pref, currentLang, onPrefChange }: GeneralPanelProps) {
+  const { t } = useI18n()
+
+  return (
+    <>
+      <PageHeader
+        title={t('options.languageTitle')}
+        description={t('options.languageDesc')}
+      />
+
+      <Card>
+        <Field
+          label={t('options.languageLabel')}
+          hint={t('options.languageScopeNote')}
+        >
+          <Select
+            value={pref}
+            options={[
+              {
+                value: 'auto',
+                label: t('options.langAuto', { language: langDisplayName(currentLang) }),
+              },
+              { value: 'zh', label: t('options.langZh') },
+              { value: 'en', label: t('options.langEn') },
+            ]}
+            onChange={(event) => {
+              const next = event.target.value
+              if (!LANG_PREF_VALUES.includes(next as LangPref)) return
+              void onPrefChange(next as LangPref)
+            }}
+          />
+        </Field>
+      </Card>
     </>
   )
 }
 
 // ———————————————————————————————————— helpers ————————————————————————————————————
 
-function validate(limits: AgentLimits): { valid: boolean; message: string } {
+function validate(
+  limits: AgentLimits,
+  t: I18n['t'],
+): { valid: boolean; message: string } {
   const parts: string[] = []
   if (!Number.isInteger(limits.maxRounds) || limits.maxRounds < 1) {
-    parts.push('最大工具调用轮次必须是正整数')
+    parts.push(t('options.errMaxRounds'))
   }
   if (!Number.isInteger(limits.toolTimeoutMs) || limits.toolTimeoutMs < 1000) {
-    parts.push('单工具执行超时必须是不小于 1000 的整数（毫秒）')
+    parts.push(t('options.errToolTimeout'))
   }
   if (
     !Number.isInteger(limits.requestTimeoutMs) ||
     limits.requestTimeoutMs < 5000
   ) {
-    parts.push('模型请求超时必须是不小于 5000 的整数（毫秒）')
+    parts.push(t('options.errRequestTimeout'))
   }
   if (parts.length === 0) return { valid: true, message: '' }
-  return { valid: false, message: parts.join('；') }
+  return { valid: false, message: parts.join(t('options.joinErrors')) }
 }
 
 function formatTime(ts: number): string {
@@ -673,49 +750,3 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-// ———————————————————————————————————— 布局样式 ————————————————————————————————————
-
-const shellStyle: React.CSSProperties = {
-  display: 'flex',
-  minHeight: '100vh',
-  background: '#fafafa',
-  fontFamily:
-    '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-}
-
-const sidebarStyle: React.CSSProperties = {
-  width: 220,
-  flexShrink: 0,
-  padding: '20px 14px',
-  background: '#fff',
-  borderRight: '1px solid #e5e7eb',
-  position: 'sticky',
-  top: 0,
-  height: '100vh',
-  overflowY: 'auto',
-  boxSizing: 'border-box',
-}
-
-const sidebarHeaderStyle: React.CSSProperties = {
-  paddingBottom: 12,
-  borderBottom: '1px solid #f3f4f6',
-}
-
-const contentStyle: React.CSSProperties = {
-  flex: 1,
-  padding: '32px 24px 72px',
-  maxWidth: 880,
-  boxSizing: 'border-box',
-}
-
-const errorBannerStyle: React.CSSProperties = {
-  marginBottom: 16,
-  padding: '10px 12px',
-  borderRadius: 6,
-  fontSize: 12,
-  lineHeight: 1.6,
-  background: '#fef2f2',
-  color: '#b91c1c',
-  border: '1px solid #fecaca',
-  wordBreak: 'break-word',
-}

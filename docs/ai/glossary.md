@@ -17,3 +17,4 @@ Use this table when a product term does not match the name used in code.
 | Tab | `TabSummary`, `TabOpenResult` | `packages/browser-tools/src/types.ts` |
 | Site permissions | `requestOriginPermissions`, `isRequestableOriginPattern` | `apps/chrome-extension/src/shared/permissions.ts` |
 | Local log database | `LOCAL_DB_NAME`, `TASK_STORE` | `apps/chrome-extension/src/shared/local-db.ts` |
+| Interface language | `uiLanguage`, `LangPref`, `useI18n`, `_locales` | `apps/chrome-extension/src/shared/i18n.ts`, `apps/chrome-extension/src/shared/useI18n.ts`, `apps/chrome-extension/public/_locales/` |

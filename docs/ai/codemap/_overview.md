@@ -4,7 +4,7 @@
 
 | Module | Files | Lines | Workspace dependencies |
 | --- | ---: | ---: | --- |
-| apps/chrome-extension | 20 | 5343 | `agent-core`, `browser-tools`, `llm-client` |
+| apps/chrome-extension | 38 | 7549 | `agent-core`, `browser-tools`, `llm-client` |
 | packages/agent-core | 6 | 796 | `llm-client` |
 | packages/browser-tools | 3 | 546 | `agent-core` |
 | packages/llm-client | 7 | 820 | - |
@@ -18,13 +18,13 @@
 
 | Path | Lines |
 | --- | ---: |
-| apps/chrome-extension/src/sidepanel/App.tsx | 1285 |
+| apps/chrome-extension/src/sidepanel/App.tsx | 1351 |
 | apps/chrome-extension/src/content/index.ts | 800 |
-| apps/chrome-extension/src/options/App.tsx | 722 |
+| apps/chrome-extension/src/options/App.tsx | 753 |
 | apps/chrome-extension/src/background/index.ts | 574 |
+| apps/chrome-extension/src/shared/i18n.ts | 468 |
 | packages/agent-core/src/loop.ts | 458 |
 | apps/chrome-extension/src/shared/step-log-storage.ts | 435 |
 | packages/llm-client/src/chat.ts | 395 |
 | packages/browser-tools/src/tools.ts | 373 |
-| apps/chrome-extension/src/options/ProviderForm.tsx | 281 |
-| apps/chrome-extension/src/sidepanel/TaskHistory.tsx | 233 |
+| apps/chrome-extension/src/sidepanel/file-tools.ts | 339 |
