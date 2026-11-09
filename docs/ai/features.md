@@ -52,6 +52,7 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 
 - Storage: `apps/chrome-extension/src/shared/storage.ts` (`ProviderConfig`, `loadProviders`, `saveProvider`)
 - UI: `apps/chrome-extension/src/options/ProviderForm.tsx`, `apps/chrome-extension/src/options/App.tsx`
+- Side Panel model switcher (grouped by provider, opens upward): `apps/chrome-extension/src/sidepanel/components/ModelPicker.tsx`
 
 ## Permissions, message routing, and injection
 

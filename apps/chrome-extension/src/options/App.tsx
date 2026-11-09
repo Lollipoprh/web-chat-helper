@@ -238,9 +238,6 @@ export default function App() {
     <div style={shellStyle}>
       <aside style={sidebarStyle}>
         <div style={sidebarHeaderStyle}>
-          <div style={{ fontSize: 15, fontWeight: fontWeight.semibold, color: color.text }}>
-            Web Chat Helper
-          </div>
           <div style={{ fontSize: fontSize.xs, color: color.textFaint, marginTop: 2 }}>设置</div>
         </div>
         <nav style={{ marginTop: space.lg }}>

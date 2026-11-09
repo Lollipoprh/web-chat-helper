@@ -46,7 +46,7 @@ used by: `apps/chrome-extension/src/ui/index.ts`
 ## src/ui/index.ts (20 lines)
 reexports: `./Alert`, `./Badge`, `./Button`, `./Card`, `./Checkbox`, `./Field`, `./Input`, `./Select`, `./style`, `./tokens`
 imports: `apps/chrome-extension/src/ui/Alert.tsx`, `apps/chrome-extension/src/ui/Badge.tsx`, `apps/chrome-extension/src/ui/Button.tsx`, `apps/chrome-extension/src/ui/Card.tsx`, `apps/chrome-extension/src/ui/Checkbox.tsx`, `apps/chrome-extension/src/ui/Field.tsx`, `apps/chrome-extension/src/ui/Input.tsx`, `apps/chrome-extension/src/ui/Select.tsx`, `apps/chrome-extension/src/ui/style.ts`, `apps/chrome-extension/src/ui/tokens.ts`
-used by: `apps/chrome-extension/src/options/App.tsx`, `apps/chrome-extension/src/options/ProviderForm.tsx`, `apps/chrome-extension/src/options/styles.ts`, `apps/chrome-extension/src/sidepanel/App.tsx`, `apps/chrome-extension/src/sidepanel/TaskHistory.tsx`, `apps/chrome-extension/src/sidepanel/components/MessageBubble.tsx`, `apps/chrome-extension/src/sidepanel/components/ToolEventItem.tsx`
+used by: `apps/chrome-extension/src/options/App.tsx`, `apps/chrome-extension/src/options/ProviderForm.tsx`, `apps/chrome-extension/src/options/styles.ts`, `apps/chrome-extension/src/sidepanel/App.tsx`, `apps/chrome-extension/src/sidepanel/TaskHistory.tsx`, `apps/chrome-extension/src/sidepanel/components/MessageBubble.tsx`, `apps/chrome-extension/src/sidepanel/components/ModelPicker.tsx`, `apps/chrome-extension/src/sidepanel/components/ToolEventItem.tsx`
 
 ## src/ui/Input.tsx (79 lines)
 - :9 — `InputProps`

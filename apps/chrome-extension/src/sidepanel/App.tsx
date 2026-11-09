@@ -63,13 +63,16 @@ import {
   UNSAFE_SKIP_CONFIRM_KEY,
   loadAgentLimits,
   loadDefaultProvider,
+  loadProviders,
   loadSkipConfirm,
   saveSkipConfirm,
+  setDefaultProvider,
 } from '../shared/storage'
 import TaskHistory from './TaskHistory'
 import { MessageBubble, type MessageStatus } from './components/MessageBubble'
+import { ModelPicker } from './components/ModelPicker'
 import { ToolEventItem } from './components/ToolEventItem'
-import { Alert, Button, Checkbox, Select, TextArea, color, fontSize, radius, space } from '../ui'
+import { Alert, Button, Select, TextArea, color, fontSize, radius, space } from '../ui'
 import {
   bindFile,
   listBoundFiles,
@@ -106,6 +109,8 @@ interface UiMessage {
 
 export default function App() {
   const [provider, setProvider] = useState<ProviderConfig | null>(null)
+  // 已配置的供应商列表，供底部输入区切换模型
+  const [providers, setProviders] = useState<ProviderConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [sessions, setSessions] = useState<SessionRecord[]>([])
@@ -146,10 +151,14 @@ export default function App() {
   // 当前活动标签页：发送任务时同步读取，用于绑定目标页并申请站点权限
   const activeTabRef = useRef<{ id?: number; url?: string } | null>(null)
 
-  // 读取默认供应商
+  // 读取默认供应商及其余可选供应商
   const refreshProvider = useCallback(async () => {
-    const defaultProvider = await loadDefaultProvider()
+    const [defaultProvider, allProviders] = await Promise.all([
+      loadDefaultProvider(),
+      loadProviders(),
+    ])
     setProvider(defaultProvider)
+    setProviders(allProviders)
     setLoading(false)
   }, [])
 
@@ -783,6 +792,14 @@ export default function App() {
     }
   }
 
+  // 切换供应商：只改默认项，storage 监听器会刷新当前 provider
+  function handleProviderChange(id: string) {
+    if (!id || id === provider?.id) return
+    void setDefaultProvider(id).catch((error: unknown) => {
+      console.warn('[sidepanel] 切换供应商失败', error)
+    })
+  }
+
   const canSend =
     Boolean(provider) && Boolean(activeSessionId) && input.trim().length > 0 && !generating
 
@@ -859,13 +876,6 @@ export default function App() {
           disabled={generating || !activeSessionId}
         >
           清空
-        </Button>
-        <Button
-          size="sm"
-          onClick={() => setView((current) => (current === 'history' ? 'chat' : 'history'))}
-          disabled={!activeSessionId}
-        >
-          {view === 'history' ? '返回对话' : '任务记录'}
         </Button>
         <Button size="sm" onClick={toggleFileManager}>
           {showFileManager ? '收起文件' : '文件管理'}
@@ -1017,121 +1027,286 @@ export default function App() {
         </Alert>
       )}
 
-      <main style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
-        {view === 'history' && activeSessionId ? (
-          <TaskHistory sessionId={activeSessionId} />
-        ) : loading ? (
-          <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>加载中…</p>
-        ) : !provider ? (
-          <div style={{ textAlign: 'center', color: color.textSecondary, marginTop: 40 }}>
-            <p style={{ margin: 0 }}>尚未配置模型供应商</p>
-            <Button variant="primary" style={{ marginTop: space.lg }} onClick={openOptions}>
-              前往设置
-            </Button>
-          </div>
-        ) : messages.length === 0 ? (
-          <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>输入问题开始对话。</p>
-        ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: message.role === 'user' ? 'flex-end' : 'flex-start',
-                marginBottom: 10,
-              }}
-            >
-              {/* 工具调用事件：默认收起显示名称/状态/耗时，点击展开参数与摘要，
-                  且排在回复文本之前 —— 用户先看到模型做了什么，再看到最终答复 */}
-              {message.role === 'assistant' &&
-                message.toolEvents &&
-                message.toolEvents.length > 0 && (
+      {/* 内容区：对话栏与任务记录叠放在同一区域，用 transform 左右滑动切换 */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+        {/* 对话栏：默认显示，展开任务记录时整体向左滑出 */}
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            background: color.surface,
+            transform: view === 'history' ? 'translateX(-100%)' : 'translateX(0)',
+            transition: 'transform 240ms ease',
+          }}
+        >
+          {/* 消息区单独成层，侧拉按钮以此为基准垂直居中，不因输入框而偏移 */}
+          <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
+            <main style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
+              {loading ? (
+                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>加载中…</p>
+              ) : !provider ? (
+                <div
+                  style={{ textAlign: 'center', color: color.textSecondary, marginTop: 40 }}
+                >
+                  <p style={{ margin: 0 }}>尚未配置模型供应商</p>
+                  <Button
+                    variant="primary"
+                    style={{ marginTop: space.lg }}
+                    onClick={openOptions}
+                  >
+                    前往设置
+                  </Button>
+                </div>
+              ) : messages.length === 0 ? (
+                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
+                  输入问题开始对话。
+                </p>
+              ) : (
+                messages.map((message) => (
                   <div
+                    key={message.id}
                     style={{
-                      maxWidth: '92%',
-                      width: '100%',
-                      marginBottom: 4,
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: 4,
+                      alignItems: message.role === 'user' ? 'flex-end' : 'flex-start',
+                      marginBottom: 10,
                     }}
                   >
-                    {message.toolEvents.map((event) => (
-                      <ToolEventItem
-                        key={event.id}
-                        event={event}
-                        expanded={expandedToolEvents.has(event.id)}
-                        onToggle={() => toggleToolEvent(event.id)}
-                      />
-                    ))}
+                    {/* 工具调用事件：默认收起显示名称/状态/耗时，点击展开参数与摘要，
+                        且排在回复文本之前 —— 用户先看到模型做了什么，再看到最终答复 */}
+                    {message.role === 'assistant' &&
+                      message.toolEvents &&
+                      message.toolEvents.length > 0 && (
+                        <div
+                          style={{
+                            maxWidth: '92%',
+                            width: '100%',
+                            marginBottom: 4,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 4,
+                          }}
+                        >
+                          {message.toolEvents.map((event) => (
+                            <ToolEventItem
+                              key={event.id}
+                              event={event}
+                              expanded={expandedToolEvents.has(event.id)}
+                              onToggle={() => toggleToolEvent(event.id)}
+                            />
+                          ))}
+                        </div>
+                      )}
+
+                    <MessageBubble
+                      role={message.role}
+                      content={message.content}
+                      status={message.status}
+                      error={message.error}
+                    />
                   </div>
-                )}
+                ))
+              )}
+              <div ref={bottomRef} />
+            </main>
+            <PullTab
+              label="任务记录"
+              disabled={!activeSessionId}
+              onClick={() => setView('history')}
+            />
+          </div>
 
-              <MessageBubble
-                role={message.role}
-                content={message.content}
-                status={message.status}
-                error={message.error}
-              />
-            </div>
-          ))
-        )}
-        <div ref={bottomRef} />
-      </main>
-
-      {view === 'chat' && (
-        <footer style={{ padding: 10, borderTop: `1px solid ${color.border}` }}>
-          <TextArea
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={provider ? '输入问题，Enter 发送，Shift+Enter 换行' : '请先配置供应商'}
-            disabled={!provider || loading}
-            rows={3}
-            style={{ background: provider ? color.surface : color.surfaceMuted }}
-          />
-        <div style={{ display: 'flex', gap: space.md, marginTop: space.md }}>
-          {generating ? (
-            <Button variant="danger" onClick={handleStop}>
-              停止
-            </Button>
-          ) : (
-            <Button variant="primary" disabled={!canSend} onClick={() => void handleSend()}>
-              发送
-            </Button>
-          )}
-          {provider && (
-            <span
+          <footer style={{ padding: 10, borderTop: `1px solid ${color.border}` }}>
+            {/* 输入区整体容器：上方真实输入框，下方单独一行放模型选择、权限选择和发送按钮 */}
+            <div
               style={{
-                fontSize: 11,
-                color: color.textFaint,
-                alignSelf: 'center',
+                borderRadius: radius.lg,
+                background: provider ? color.surface : color.surfaceMuted,
+                overflow: 'hidden',
               }}
             >
-              {provider.supportsStreaming ? '流式输出' : '非流式输出'}
-            </span>
-          )}
+              <TextArea
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  provider ? '输入问题，Enter 发送，Shift+Enter 换行' : '请先配置供应商'
+                }
+                disabled={!provider || loading}
+                rows={3}
+                style={{
+                  display: 'block',
+                  border: 'none',
+                  borderRadius: 0,
+                  outline: 'none',
+                  background: 'transparent',
+                  padding: '4px 8px',
+                  maxHeight: 140,
+                  overflowY: 'auto',
+                  lineHeight: 1.4,
+                }}
+              />
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: space.md,
+                  padding: '6px 8px',
+                  borderTop: `1px solid ${color.borderMuted}`,
+                }}
+              >
+                {providers.length > 0 ? (
+                  <ModelPicker
+                    providers={providers}
+                    value={provider?.id ?? ''}
+                    disabled={generating}
+                    onChange={handleProviderChange}
+                  />
+                ) : (
+                  <span style={{ flex: 1, fontSize: 11, color: color.textFaint }}>
+                    未配置供应商
+                  </span>
+                )}
+                <Select
+                  size="sm"
+                  block={false}
+                  value={skipConfirm ? 'skip' : 'confirm'}
+                  onChange={(event) => {
+                    if ((event.target.value === 'skip') === skipConfirm) return
+                    void handleToggleSkipConfirm()
+                  }}
+                  title={
+                    skipConfirm
+                      ? '已开启：全局自动执行风险操作（不再弹窗确认）'
+                      : '允许全局自动执行风险操作（默认关闭）'
+                  }
+                  options={[
+                    { value: 'confirm', label: '操作需确认' },
+                    { value: 'skip', label: '操作自动执行' },
+                  ]}
+                  style={{
+                    flex: 'none',
+                    width: 96,
+                    minWidth: 0,
+                    border: 'none',
+                    appearance: 'none',
+                    background: color.surfaceSubtle,
+                    color: skipConfirm ? color.warning : color.textSecondary,
+                  }}
+                />
+                {provider && (
+                  <span
+                    style={{
+                      flex: 'none',
+                      fontSize: 11,
+                      color: color.textFaint,
+                    }}
+                  >
+                    {provider.supportsStreaming ? '流式输出' : '非流式输出'}
+                  </span>
+                )}
+                {generating ? (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    style={{ marginLeft: 'auto' }}
+                    onClick={handleStop}
+                  >
+                    停止
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={!canSend}
+                    style={{ marginLeft: 'auto' }}
+                    onClick={() => void handleSend()}
+                  >
+                    发送
+                  </Button>
+                )}
+              </div>
+            </div>
+          </footer>
         </div>
-        <Checkbox
-          size="sm"
-          checked={skipConfirm}
-          onChange={() => void handleToggleSkipConfirm()}
+
+        {/* 任务记录：点击侧拉按钮时从右侧滑入 */}
+        <aside
           style={{
-            marginTop: space.sm,
-            color: skipConfirm ? color.danger : color.textMuted,
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            background: color.surface,
+            transform: view === 'history' ? 'translateX(0)' : 'translateX(100%)',
+            transition: 'transform 240ms ease',
           }}
-          label={
-            <span style={{ color: 'orange' }}>
-              {skipConfirm
-                ? '⚠️ 已开启：全局自动执行风险操作（不再弹窗确认）'
-                : '允许全局自动执行风险操作（默认关闭）'}
-            </span>
-          }
-        />
-        </footer>
-      )}
+        >
+          <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
+            {/* 右侧留出侧拉按钮的宽度，避免列表内容与按钮边框重叠 */}
+            <main style={{ flex: 1, overflowY: 'auto', padding: '12px 32px 12px 14px' }}>
+              {activeSessionId ? (
+                <TaskHistory sessionId={activeSessionId} />
+              ) : (
+                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>尚未选择会话</p>
+              )}
+            </main>
+            <PullTab
+              label="返回对话"
+              disabled={!activeSessionId}
+              onClick={() => setView('chat')}
+            />
+          </div>
+        </aside>
+      </div>
     </div>
+  )
+}
+
+/**
+ * 侧拉按钮：始终贴在内容区右边缘，距顶部的固定偏移量保证两个视图位置的上下一致。
+ */
+function PullTab({
+  label,
+  disabled,
+  onClick,
+}: {
+  label: string
+  disabled: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      style={{
+        position: 'absolute',
+        top: 100,
+        right: 0,
+        zIndex: 5,
+        width: 16,
+        height: 56,
+        padding: 0,
+        borderTop: `1px solid ${color.border}`,
+        borderBottom: `1px solid ${color.border}`,
+        borderLeft: `1px solid ${color.border}`,
+        borderRight: 'none',
+        borderRadius: '6px 0 0 6px',
+        background: color.surfaceMuted,
+        color: disabled ? color.textFaint : color.textMuted,
+        fontFamily: 'inherit',
+        fontSize: 12,
+        lineHeight: 1,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+      }}
+    >
+      ‹
+    </button>
   )
 }
 
