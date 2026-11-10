@@ -14,6 +14,7 @@ Use this table when a product term does not match the name used in code.
 | Checkpoint / interrupted task recovery | `AgentCheckpoint`, `checkpoint-storage.ts` | `apps/chrome-extension/src/shared/checkpoint-storage.ts` |
 | Page snapshot | `PageSnapshot`, `snapshot` | `packages/browser-tools/src/types.ts`, `packages/browser-tools/src/tools.ts` |
 | Element targeting | `ElementSummary`, `find_elements` | `packages/browser-tools/src/tools.ts` |
+| Input injection / 输入注入 | `commitText`, `planFillStrategies`, `FillStrategy`, `evaluateFill` | `apps/chrome-extension/src/content/input-injection.ts`, `packages/browser-tools/src/types.ts` |
 | Tab | `TabSummary`, `TabOpenResult` | `packages/browser-tools/src/types.ts` |
 | Site permissions | `requestOriginPermissions`, `isRequestableOriginPattern` | `apps/chrome-extension/src/shared/permissions.ts` |
 | Local log database | `LOCAL_DB_NAME`, `TASK_STORE` | `apps/chrome-extension/src/shared/local-db.ts` |
