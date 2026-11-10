@@ -8,6 +8,96 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
 本文件记录 Web Chat Helper 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+## [0.1.3] - 2026-11-10
+
+### Added / 新增
+
+- **Input injection module** — `apps/chrome-extension/src/content/input-injection.ts` with
+  `commitText`, `planFillStrategies`, `evaluateFill`, `describeFillFailure`; pure-logic helpers
+  (`normalizeForCompare`, `looseMatch`, `codePointLength`) unit-testable in node without jsdom.
+  **输入注入模块** —— `apps/chrome-extension/src/content/input-injection.ts`，含 `commitText`、
+  `planFillStrategies`、`evaluateFill`、`describeFillFailure`；纯逻辑函数（`normalizeForCompare`、
+  `looseMatch`、`codePointLength`）可在无 jsdom 的 node 环境直接单测。
+- **Fill strategy enum** — `FillStrategy` (`insert-text-command`, `native-value-setter`,
+  `instance-value-setter`, `select-value`) exported from `packages/browser-tools/src/types.ts`,
+  surfaced in `FillResult`.
+  **写入策略枚举** —— `FillStrategy`（`insert-text-command`、`native-value-setter`、
+  `instance-value-setter`、`select-value`）从 `packages/browser-tools/src/types.ts`
+  导出并体现在 `FillResult` 中。
+- **Manual verification fixture** — `docs/manual-tests/input-injection.html` covering
+  nine scenarios: native required input, custom value accessor, `beforeinput` rejection,
+  write reversion, contenteditable editor, masked input, blur-only validation,
+  auto-save `change` counting, and field clearing.
+  **手工验收夹具** —— `docs/manual-tests/input-injection.html` 覆盖九个场景：原生必填、
+  自定义 accessor、`beforeinput` 拒绝、写入被回滚、contenteditable 编辑器、掩码输入、
+  失焦校验、自动保存 `change` 计数、清空字段。
+
+### Changed / 变更
+
+- **`fill_input` now verifies every write** — text is committed through the browser's own
+  editing command (`execCommand('insertText')`) first and falls back to value setters only when
+  the page rejects or reverts it; afterwards the field is read back, HTML5 constraint validity is
+  checked, and a rejected / reverted / truncated write returns `execution_failed` with an
+  actionable reason instead of reporting success. `contenteditable` is no longer rebuilt with
+  `textContent`, so backspace and paste keep working after injection. `valueLength` in the tool
+  result is now the read-back length (code-point count), no longer the input parameter length.
+  **`fill_input` 写入后回读校验** —— 优先使用浏览器原生编辑命令写入，页面拒绝或回滚时才降级到
+  value setter；写入后回读字段并检查 HTML5 约束校验，被拒绝 / 回滚 / 截断时返回
+  `execution_failed` 并说明原因，不再谎报成功。`contenteditable` 不再用 `textContent` 重建，
+  注入后退格与粘贴保持可用；工具结果里的 `valueLength` 改为回读到的码点长度。
+- **`select_option` now confirms commitment** — dispatches focus + form events, reads back the
+  actual `select.value`, and sets `committed: false` when the page reverts to a different option
+  (common with cascading validations). Tool result reflects the commitment status.
+  **`select_option` 增加回读确认** —— 派发 focus + 表单事件后回读 `select.value`，
+  页面立即改回原选项（常见于联动校验）时返回 `committed: false`，工具结果如实反映。
+- **`submitForm` honours HTML5 constraints** — calls `form.checkValidity()` before
+  `requestSubmit()`; when invalid, returns `submitted: false` with the first invalid field's
+  `validationMessage` instead of pretending the form was submitted.
+  **`submitForm` 尊重 HTML5 约束** —— `requestSubmit()` 前先 `form.checkValidity()`；
+  校验不通过时返回 `submitted: false` 并带上首个无效字段的 `validationMessage`，
+  不再谎报已提交。
+- **Keyboard dispatch carries legacy fields** — `dispatchEnter` now also fires `keyCode: 13`
+  and `which: 13`, matching older pages that still read the deprecated fields.
+  **键盘事件补全废弃字段** —— `dispatchEnter` 现在同时携带 `keyCode: 13` 和 `which: 13`，
+  兼容仍在读取这两个废弃字段的老页面。
+- **Result semantics (breaking, scope: tool result only)** — `FillResult` adds
+  `expectedLength`, `strategy`, `committed`, `validityValid`, `validationMessage`;
+  `SelectResult` adds `committed`. Old code treating `valueLength` as the input length must
+  read `expectedLength` instead. No manifest / permission changes.
+  **结果语义调整（破坏性，仅限工具结果）** —— `FillResult` 新增 `expectedLength`、
+  `strategy`、`committed`、`validityValid`、`validationMessage`；`SelectResult` 新增
+  `committed`。把 `valueLength` 当作入参长度的调用方需改用 `expectedLength`。
+  无 manifest / 权限变更。
+
+### Fixed / 修复
+
+- **Write not being recognized by framework-controlled inputs** — the prototype-value-setter
+  path was correct for React's `_valueTracker`, but pages that install their own `value` accessor
+  (input masks, jQuery plugins, Web Components) were never synchronised; the model saw success
+  while the page model stayed empty → validation "required" fired after submit. Fallback to the
+  instance setter only after observing an actual revert prevents accidentally breaking React's
+  change detection.
+  **受控输入不认可写入** —— 原型 setter 对 React 的 `_valueTracker` 有效，但自行安装
+  `value` accessor 的页面（输入掩码、jQuery 插件、Web Component）完全不同步；模型看到
+  「填写成功」而页面 model 仍为空，提交后才爆红「必填」。仅在观测到回滚后才降级到
+  实例 setter，避免误伤 React 的变更检测。
+- **`contenteditable` losing edit capabilities after injection** — `textContent = text`
+  rebuilds the document, discarding editor model, undo stack, and selection; subsequent typing
+  still works but delete / paste go through the editor's own handlers whose state no longer
+  matches the DOM. `commitText` now always uses browser editing commands for contenteditable.
+  **`contenteditable` 注入后退格 / 粘贴失效** —— `textContent = text` 直接重建节点，
+  编辑器 model、撤销栈、选区全部丢失，后续退格 / 粘贴走编辑器自己的处理器却和 DOM
+  脱节。`commitText` 对 contenteditable 统一走浏览器编辑命令。
+- **`beforeinput`-based editors treating the write as a no-op** — ProseMirror / Lexical / Slate
+  / Draft.js / Quill build their edit transaction on `beforeinput`, which the previous code
+  never dispatched; they saw an unchanged document and returned. Trusted `insertText` commands
+  give these editors the event they expect.
+  **基于 `beforeinput` 的编辑器无视写入** —— ProseMirror / Lexical / Slate / Draft.js /
+  Quill 等编辑器靠 `beforeinput` 构建编辑事务，旧代码从不派发，它们拿到「文档未变」
+  的结论就什么也不做。可信的 `insertText` 命令能让这些编辑器走通自己的路径。
+
 ## [0.1.2] - 2026-11-09
 
 ### Added / 新增
@@ -159,7 +249,8 @@ model continues decision or gives the final answer.
   may still change. Check future release notes before upgrading.
   首个版本，供应商配置结构、跨上下文消息协议与工具参数仍可能调整，升级前请留意后续变更说明。
 
-[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.3
 [0.1.2]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.0

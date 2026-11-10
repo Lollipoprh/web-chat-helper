@@ -4,9 +4,9 @@
 
 | Module | Files | Lines | Workspace dependencies |
 | --- | ---: | ---: | --- |
-| apps/chrome-extension | 38 | 7549 | `agent-core`, `browser-tools`, `llm-client` |
+| apps/chrome-extension | 39 | 8140 | `agent-core`, `browser-tools`, `llm-client` |
 | packages/agent-core | 6 | 796 | `llm-client` |
-| packages/browser-tools | 3 | 546 | `agent-core` |
+| packages/browser-tools | 3 | 586 | `agent-core` |
 | packages/llm-client | 7 | 820 | - |
 
 ## Dependency direction (derived from imports)
@@ -19,12 +19,12 @@
 | Path | Lines |
 | --- | ---: |
 | apps/chrome-extension/src/sidepanel/App.tsx | 1351 |
-| apps/chrome-extension/src/content/index.ts | 800 |
+| apps/chrome-extension/src/content/index.ts | 883 |
 | apps/chrome-extension/src/options/App.tsx | 753 |
 | apps/chrome-extension/src/background/index.ts | 574 |
+| apps/chrome-extension/src/content/input-injection.ts | 508 |
 | apps/chrome-extension/src/shared/i18n.ts | 468 |
 | packages/agent-core/src/loop.ts | 458 |
 | apps/chrome-extension/src/shared/step-log-storage.ts | 435 |
 | packages/llm-client/src/chat.ts | 395 |
-| packages/browser-tools/src/tools.ts | 373 |
-| apps/chrome-extension/src/sidepanel/file-tools.ts | 339 |
+| packages/browser-tools/src/tools.ts | 392 |

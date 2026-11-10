@@ -20,6 +20,16 @@ import type {
   WaitResult,
 } from 'browser-tools'
 import { MESSAGE_TYPES } from '../shared/index'
+import {
+  classifyEditable,
+  codePointLength,
+  commitText,
+  describeFillFailure,
+  dispatchFormEvents,
+  focusDeep,
+  readValidity,
+} from './input-injection'
+import type { EditableElement } from './input-injection'
 
 const MAX_TEXT_CHARS = 8000
 const MAX_ELEMENTS = 80
@@ -401,34 +411,81 @@ function clickElement(args: Record<string, unknown>): ClickResult {
   }
 }
 
-function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
-  const prototype =
-    element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype
-  const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
-  if (setter) setter.call(element, value)
-  else element.value = value
-}
-
-function dispatchInputEvents(element: Element, value: string): void {
-  element.dispatchEvent(
-    new InputEvent('input', {
-      bubbles: true,
-      composed: true,
-      inputType: 'insertText',
-      data: value,
-    }),
-  )
-  element.dispatchEvent(new Event('change', { bubbles: true }))
-}
-
 function dispatchEnter(element: Element): void {
-  const base = { bubbles: true, cancelable: true, composed: true, key: 'Enter', code: 'Enter' }
+  const base = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    key: 'Enter',
+    code: 'Enter',
+    keyCode: 13,
+    which: 13,
+  }
   element.dispatchEvent(new KeyboardEvent('keydown', base))
   element.dispatchEvent(new KeyboardEvent('keypress', base))
   element.dispatchEvent(new KeyboardEvent('keyup', base))
 }
 
-function fillInput(args: Record<string, unknown>): FillResult {
+const UNSUPPORTED_INPUT_TYPES = [
+  'button',
+  'submit',
+  'reset',
+  'checkbox',
+  'radio',
+  'file',
+  'hidden',
+  'password',
+]
+
+interface SubmitOutcome {
+  submitted: boolean
+  validationMessage?: string
+}
+
+/** 提交前先做约束校验：校验不通过时如实报告，不谎报已提交 */
+function submitForm(element: Element): SubmitOutcome {
+  if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement ||
+    element instanceof HTMLSelectElement
+  ) {
+    const form = element.form
+    if (form) {
+      if (!form.checkValidity()) {
+        const invalid = form.querySelector<
+          HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+        >('input:invalid, textarea:invalid, select:invalid')
+        return {
+          submitted: false,
+          validationMessage: invalid?.validationMessage || '表单校验未通过',
+        }
+      }
+      form.requestSubmit()
+      return { submitted: true }
+    }
+  }
+  // 没有表单时只能按 Enter：合成按键同样不可信，只能视为「已尝试」
+  dispatchEnter(element)
+  return { submitted: true }
+}
+
+function findSelectOption(
+  element: HTMLSelectElement,
+  text: string,
+): HTMLOptionElement | undefined {
+  return Array.from(element.options).find(
+    (item) => item.value === text || item.label === text || item.text.trim() === text.trim(),
+  )
+}
+
+function describeSelected(element: HTMLSelectElement): string {
+  const labels = Array.from(element.selectedOptions)
+    .map((option) => collapse(option.label))
+    .filter(Boolean)
+  return labels.join('、') || '空'
+}
+
+async function fillInput(args: Record<string, unknown>): Promise<FillResult> {
   const ref = readString(args, 'ref')
   if (!ref) throw new PageToolError('invalid_args', '缺少参数 ref')
   const text = readRawString(args, 'text')
@@ -446,69 +503,91 @@ function fillInput(args: Record<string, unknown>): FillResult {
     throw new PageToolError('invalid_args', `元素 ${ref} 处于禁用状态，无法填写`)
   }
 
-  let submitted = false
+  const kind = classifyEditable(element)
+  if (kind === 'select') {
+    return fillSelect(ref, element as HTMLSelectElement, text, submit)
+  }
+
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
     if (element.readOnly) {
       throw new PageToolError('invalid_args', `元素 ${ref} 为只读，无法填写`)
     }
-    if (
-      element instanceof HTMLInputElement &&
-      ['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'hidden', 'password'].includes(
-        element.type,
-      )
-    ) {
+    if (element instanceof HTMLInputElement && UNSUPPORTED_INPUT_TYPES.includes(element.type)) {
       throw new PageToolError('invalid_args', `输入框类型 ${element.type} 不支持文本填写`)
     }
-
-    element.focus()
-    setNativeValue(element, text)
-    dispatchInputEvents(element, text)
-
-    if (submit) {
-      const form = element.form
-      if (form) {
-        form.requestSubmit()
-        submitted = true
-      } else {
-        dispatchEnter(element)
-        submitted = true
-      }
-    }
-  } else if (element instanceof HTMLSelectElement) {
-    const option = Array.from(element.options).find(
-      (item) => item.value === text || item.label === text || item.text.trim() === text.trim(),
-    )
-    if (!option) {
-      throw new PageToolError('invalid_args', `下拉框中不存在选项「${text}」`)
-    }
-    element.focus()
-    element.value = option.value
-    dispatchInputEvents(element, element.value)
-    if (submit) {
-      const form = element.form
-      if (form) {
-        form.requestSubmit()
-        submitted = true
-      }
-    }
-  } else if (element instanceof HTMLElement && element.isContentEditable) {
-    element.focus()
-    element.textContent = text
-    dispatchInputEvents(element, text)
-    if (submit) {
-      dispatchEnter(element)
-      submitted = true
-    }
-  } else {
+  } else if (kind !== 'contenteditable') {
     throw new PageToolError('invalid_args', '目标元素不是可填写的输入框')
   }
 
+  scrollIntoView(element)
+  const editable = element as EditableElement
+  focusDeep(editable)
+
+  const outcome = await commitText(editable, text)
+  const strategy = outcome.strategy
+  if (!outcome.committed || !strategy) {
+    throw new PageToolError(
+      'execution_failed',
+      describeFillFailure(outcome, text, `「${elementName(element) || ref}」`),
+    )
+  }
+
+  const submission = submit ? submitForm(element) : { submitted: false }
   return {
     ref,
     tag: element.tagName.toLowerCase(),
     name: elementName(element),
-    valueLength: text.length,
-    submitted,
+    valueLength: codePointLength(outcome.actual),
+    expectedLength: codePointLength(text),
+    strategy,
+    committed: true,
+    validityValid: outcome.validity?.valid ?? true,
+    validationMessage: outcome.validity?.message ?? submission.validationMessage,
+    submitted: submission.submitted,
+  }
+}
+
+function fillSelect(
+  ref: string,
+  element: HTMLSelectElement,
+  text: string,
+  submit: boolean,
+): FillResult {
+  const option = findSelectOption(element, text)
+  if (!option) {
+    throw new PageToolError('invalid_args', `下拉框中不存在选项「${text}」`)
+  }
+
+  scrollIntoView(element)
+  focusDeep(element)
+  // 单选下拉框要显式清空其余选项；多选下拉框保留已有选择
+  if (!element.multiple) {
+    for (const item of Array.from(element.options)) item.selected = item === option
+  }
+  option.selected = true
+  element.value = option.value
+  dispatchFormEvents(element, element.value)
+
+  if (element.multiple ? !option.selected : element.value !== option.value) {
+    throw new PageToolError(
+      'execution_failed',
+      `已选择「${collapse(option.label)}」，但页面立即改回「${describeSelected(element)}」，可能有联动校验。`,
+    )
+  }
+
+  const submission = submit ? submitForm(element) : { submitted: false }
+  const validity = readValidity(element)
+  return {
+    ref,
+    tag: element.tagName.toLowerCase(),
+    name: elementName(element),
+    valueLength: codePointLength(element.value),
+    expectedLength: codePointLength(option.value),
+    strategy: 'select-value',
+    committed: true,
+    validityValid: validity?.valid ?? true,
+    validationMessage: validity?.message ?? submission.validationMessage,
+    submitted: submission.submitted,
   }
 }
 
@@ -575,8 +654,11 @@ function selectOption(args: Record<string, unknown>): SelectResult {
     for (const option of options) option.selected = option === target
   }
   target.selected = true
-  element.focus()
-  dispatchInputEvents(element, element.value)
+  focusDeep(element)
+  dispatchFormEvents(element, element.value)
+
+  // 回读确认：页面若在 change 监听里改回原值，不能当作成功
+  const committed = element.multiple ? target.selected : element.value === target.value
 
   return {
     ref,
@@ -585,6 +667,7 @@ function selectOption(args: Record<string, unknown>): SelectResult {
     selectedValue: element.value,
     selectedLabel: collapse(target.label),
     optionCount: options.length,
+    committed,
     url: location.href,
   }
 }

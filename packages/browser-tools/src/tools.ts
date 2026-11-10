@@ -11,6 +11,7 @@ import type {
   ClickResult,
   CloseTabResult,
   FillResult,
+  FillStrategy,
   FindElementsResult,
   NavigateResult,
   PageSnapshot,
@@ -119,7 +120,7 @@ export function createBrowserTools(transport: BrowserToolTransport): AgentTool[]
     {
       name: 'fill_input',
       description:
-        'Type text into an input, textarea, select or contenteditable element by ref. Input and change events are dispatched so framework-controlled fields update. Password and sensitive fields are refused. Set submit=true to submit the surrounding form, or press Enter when the element has no form.',
+        'Type text into an input, textarea, select or contenteditable element by ref. Writes go through the browser editing pipeline first, then fall back to value setters for framework-controlled fields. Every write is verified by reading the field back: if the page rejects, reformats or reverts the input, the call fails with the reason instead of reporting success. Password and sensitive fields are refused. Set submit=true to submit the surrounding form, or press Enter when the element has no form. For custom rich-text editors, click_element first to focus them, then fill.',
       parameters: {
         type: 'object',
         properties: {
@@ -136,11 +137,7 @@ export function createBrowserTools(transport: BrowserToolTransport): AgentTool[]
       requiresConfirmation: true,
       async execute(args): Promise<ToolResult> {
         const response = await send<FillResult>('fill_input', args)
-        return toResult(
-          response,
-          (data) =>
-            `已向 ${data.tag}「${data.name || data.ref}」填写 ${data.valueLength} 个字符${data.submitted ? '并提交' : ''}`,
-        )
+        return toResult(response, describeFillResult)
       },
     },
     {
@@ -351,14 +348,36 @@ export function createBrowserTools(transport: BrowserToolTransport): AgentTool[]
         }
 
         const response = await send<SelectResult>('select_option', args)
-        return toResult(
-          response,
-          (data) =>
-            `已在 ${data.tag}「${data.name || data.ref}」选中「${data.selectedLabel}」（value=${data.selectedValue}，共 ${data.optionCount} 项）`,
-        )
+        return toResult(response, (data) => {
+          const base = `已在 ${data.tag}「${data.name || data.ref}」选中「${data.selectedLabel}」（value=${data.selectedValue}，共 ${data.optionCount} 项）`
+          return data.committed ? base : `${base}，但页面随后改回了原值，可能有联动校验`
+        })
       },
     },
   ]
+}
+
+const FILL_STRATEGY_LABELS: Record<FillStrategy, string> = {
+  'insert-text-command': '原生编辑命令',
+  'native-value-setter': '原生赋值 + 事件',
+  'instance-value-setter': '组件赋值 + 事件',
+  'select-value': '下拉赋值',
+}
+
+function describeFillResult(data: FillResult): string {
+  const applied =
+    data.valueLength === data.expectedLength
+      ? `${data.valueLength} 个字符`
+      : `${data.valueLength}/${data.expectedLength} 个字符`
+  const parts = [
+    `已向 ${data.tag}「${data.name || data.ref}」写入 ${applied}（${FILL_STRATEGY_LABELS[data.strategy]}）`,
+  ]
+  if (!data.validityValid) {
+    const message = data.validationMessage ? `：「${data.validationMessage}」` : ''
+    parts.push(`页面校验未通过${message}，请先修正内容再提交`)
+  }
+  if (data.submitted) parts.push('已提交表单')
+  return parts.join('；')
 }
 
 function toResult<T>(

@@ -85,11 +85,30 @@ export interface ClickResult {
   title: string
 }
 
+/**
+ * 输入注入采用的写入策略。
+ * insert-text-command 走浏览器原生编辑命令（可信事件），其余为兜底路径。
+ */
+export type FillStrategy =
+  | 'insert-text-command'
+  | 'native-value-setter'
+  | 'instance-value-setter'
+  | 'select-value'
+
 export interface FillResult {
   ref: string
   tag: string
   name: string
+  /** 回读到的实际字符数（按码点计），不再是入参长度 */
   valueLength: number
+  /** 期望写入的字符数，供模型与回读值对比 */
+  expectedLength: number
+  strategy: FillStrategy
+  /** 写入并经回读确认；未确认时工具会返回失败，不会走到这里 */
+  committed: boolean
+  /** HTML5 约束校验是否通过；非表单控件恒为 true */
+  validityValid: boolean
+  validationMessage?: string
   submitted: boolean
 }
 
@@ -122,6 +141,8 @@ export interface SelectResult {
   selectedValue: string
   selectedLabel: string
   optionCount: number
+  /** 选择后回读确认；页面立即改回原值时可能为 false */
+  committed: boolean
   url: string
 }
 

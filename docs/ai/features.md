@@ -24,8 +24,9 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 ## Browser tools: clicks, forms, scrolling, snapshots, and tabs
 
 - Tool definitions: `packages/browser-tools/src/tools.ts` (`createBrowserTools`)
-- Result types: `packages/browser-tools/src/types.ts`
+- Result types: `packages/browser-tools/src/types.ts` (`FillResult`, `FillStrategy`, `SelectResult`)
 - In-page execution: `apps/chrome-extension/src/content/index.ts`
+- Input injection: `apps/chrome-extension/src/content/input-injection.ts` (`commitText`, `planFillStrategies`, `evaluateFill`) — writes through `execCommand` first, falls back to value setters, then reads the field back before reporting success
 - Message transport: `apps/chrome-extension/src/shared/browser-transport.ts`
 
 ## Side panel UI and chat interaction

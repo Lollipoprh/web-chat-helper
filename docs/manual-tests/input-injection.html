@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>fill_input 注入用例</title>
+    <style>
+      body { font: 14px/1.6 system-ui, sans-serif; margin: 24px; max-width: 760px; }
+      section { border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; }
+      h2 { font-size: 14px; margin: 0 0 8px; }
+      input, textarea, [contenteditable] { border: 1px solid #bbb; border-radius: 4px; padding: 6px 8px; min-width: 240px; }
+      [contenteditable] { min-height: 40px; }
+      .state { color: #666; font-family: ui-monospace, monospace; font-size: 12px; }
+      .error { color: #b00020; }
+    </style>
+  </head>
+  <body>
+    <h1>fill_input 注入用例</h1>
+    <p class="state">用扩展对每个字段执行 fill_input，然后对照「期望」检查状态行。本地页面需先授权 http://localhost。</p>
+
+    <section>
+      <h2>A. 原生必填输入</h2>
+      <input id="a" required placeholder="必填" />
+      <div class="state" id="a-state">期望：写入成功，validityValid=true</div>
+    </section>
+
+    <section>
+      <h2>B. 自定义 accessor（模拟组件库）</h2>
+      <input id="b" placeholder="自定义 value accessor" />
+      <div class="state" id="b-state">期望：model 被同步，validityValid=true</div>
+    </section>
+
+    <section>
+      <h2>C. 拒绝 beforeinput</h2>
+      <input id="c" placeholder="beforeinput 被取消" />
+      <div class="state" id="c-state">期望：失败，说明被 beforeinput 拦截</div>
+    </section>
+
+    <section>
+      <h2>D. 回滚写入</h2>
+      <input id="d" placeholder="写入后立即清空" />
+      <div class="state" id="d-state">期望：失败，说明被页面回滚</div>
+    </section>
+
+    <section>
+      <h2>E. 富文本（contenteditable）</h2>
+      <div id="e" contenteditable="true" data-placeholder="输入后应能退格、复制、粘贴"></div>
+      <div class="state" id="e-state">期望：写入成功，且退格 / 粘贴可用</div>
+    </section>
+
+    <section>
+      <h2>F. 掩码（每 4 位加空格）</h2>
+      <input id="f" placeholder="1234 5678 9012" />
+      <div class="state" id="f-state">期望：成功并标注已格式化</div>
+    </section>
+
+    <section>
+      <h2>G. 只在失焦时校验</h2>
+      <input id="g" required placeholder="blur 后才校验" />
+      <div class="state" id="g-state">期望：失焦后校验状态已更新</div>
+    </section>
+
+    <section>
+      <h2>H. 自动保存（change 计数）</h2>
+      <input id="h" placeholder="change 触发次数" />
+      <div class="state" id="h-state">change 次数：0</div>
+    </section>
+
+    <section>
+      <h2>I. 清空</h2>
+      <input id="i" placeholder="先填内容，再用 text: '' 清空" />
+      <div class="state" id="i-state">期望：成功，字段为空</div>
+    </section>
+
+    <script>
+      const $ = (id) => document.getElementById(id)
+      const show = (id, text, isError) => {
+        const node = $(id + '-state')
+        node.textContent = text
+        node.classList.toggle('error', Boolean(isError))
+      }
+
+      // A
+      $('a').addEventListener('input', () => {
+        const valid = $('a').validity.valid
+        show('a', `value=${JSON.stringify($('a').value)} validityValid=${valid}`, !valid)
+      })
+
+      // B：自定义 accessor，只有实例 setter 才会同步 model
+      ;(() => {
+        const el = $('b')
+        let model = ''
+        Object.defineProperty(el, 'value', {
+          configurable: true,
+          get: () => el.getAttribute('data-value') || '',
+          set: (next) => {
+            model = next
+            el.setAttribute('data-value', next)
+            el.setAttribute('data-model', next)
+          },
+        })
+        el.addEventListener('input', () => {
+          if (el.value === model) return
+          show('b', `model=${JSON.stringify(model)} dom=${JSON.stringify(el.value)} 未同步`, true)
+        })
+        setInterval(() => {
+          if (!el.value) return
+          const synced = el.value === model
+          show('b', `model=${JSON.stringify(model)} dom=${JSON.stringify(el.value)} ${synced ? '已同步' : '未同步'}`, !synced)
+        }, 100)
+      })()
+
+      // C：拒绝一切输入
+      $('c').addEventListener('beforeinput', (event) => {
+        event.preventDefault()
+        show('c', 'beforeinput 已被页面取消', true)
+      })
+
+      // D：写入后立刻清空
+      $('d').addEventListener('input', () => {
+        $('d').value = ''
+        show('d', '页面已把值改回空串', true)
+      })
+
+      // E：模拟编辑器，自行处理 beforeinput
+      ;(() => {
+        const el = $('e')
+        el.addEventListener('beforeinput', (event) => {
+          if (event.inputType !== 'insertText' || !event.data) return
+          event.preventDefault()
+          el.textContent = event.data
+          show('e', '编辑器接管了本次输入')
+        })
+      })()
+
+      // F：每 4 位插空格
+      $('f').addEventListener('input', () => {
+        const digits = $('f').value.replace(/\s+/g, '')
+        const masked = digits.replace(/(\d{4})(?=\d)/g, '$1 ')
+        if ($('f').value !== masked) $('f').value = masked
+        show('f', `value=${JSON.stringify($('f').value)}`)
+      })
+
+      // G：只在 blur 时校验
+      $('g').addEventListener('blur', () => {
+        const valid = $('g').validity.valid
+        show('g', `validityValid=${valid}`, !valid)
+      })
+
+      // H：统计 change 次数
+      let changeCount = 0
+      $('h').addEventListener('change', () => {
+        changeCount += 1
+        show('h', `change 次数：${changeCount}`, false)
+      })
+
+      // I：记录清空结果
+      $('i').addEventListener('input', () => {
+        show('i', `value=${JSON.stringify($('i').value)}`)
+      })
+    </script>
+  </body>
+</html>
