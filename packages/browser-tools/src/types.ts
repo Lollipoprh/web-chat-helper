@@ -14,6 +14,11 @@ export type BrowserAction =
   | 'verify_action'
   | 'navigate_tab'
   | 'select_option'
+  | 'set_element_text'
+  | 'set_element_attribute'
+  | 'set_element_style'
+  | 'remove_element'
+  | 'insert_element'
   | 'list_tabs'
   | 'new_tab'
   | 'switch_tab'
@@ -144,6 +149,55 @@ export interface SelectResult {
   /** 选择后回读确认；页面立即改回原值时可能为 false */
   committed: boolean
   url: string
+}
+
+/** DOM 修改类工具的公共字段：操作目标与操作后的页面地址 */
+export interface MutationTarget {
+  ref: string
+  tag: string
+  name: string
+  url: string
+}
+
+export interface SetTextResult extends MutationTarget {
+  /** 修改前的文本（截断预览） */
+  previousText: string
+  /** 修改后回读到的文本（截断预览） */
+  text: string
+  changed: boolean
+}
+
+export interface SetAttributeResult extends MutationTarget {
+  attribute: string
+  previousValue: string | null
+  /** 回读到的属性值；移除属性时为 null */
+  value: string | null
+}
+
+export interface SetStyleResult extends MutationTarget {
+  /** 实际写入的样式声明 */
+  applied: Record<string, string>
+  /** 写入后从计算样式回读到的值，用于确认页面没有覆盖 */
+  computed: Record<string, string>
+}
+
+export type RemoveMode = 'remove' | 'hide'
+
+export interface RemoveElementResult extends MutationTarget {
+  mode: RemoveMode
+  removed: boolean
+  /** 隐藏模式下回读可见性；删除模式恒为 false */
+  stillVisible: boolean
+}
+
+export type InsertPosition = 'before' | 'after' | 'prepend' | 'append'
+
+export interface InsertElementResult extends MutationTarget {
+  position: InsertPosition
+  /** 实际插入的元素个数（经过消毒后） */
+  insertedCount: number
+  /** 插入内容中的文本预览 */
+  text: string
 }
 
 /** 标签页摘要：仅暴露定位所需字段，不含 DOM 内容 */

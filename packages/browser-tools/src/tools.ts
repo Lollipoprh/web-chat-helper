@@ -13,10 +13,16 @@ import type {
   FillResult,
   FillStrategy,
   FindElementsResult,
+  InsertElementResult,
+  InsertPosition,
   NavigateResult,
   PageSnapshot,
+  RemoveElementResult,
   ScrollResult,
   SelectResult,
+  SetAttributeResult,
+  SetStyleResult,
+  SetTextResult,
   SwitchTabResult,
   TabOpenResult,
   TabsListResult,
@@ -352,6 +358,149 @@ export function createBrowserTools(transport: BrowserToolTransport): AgentTool[]
           const base = `已在 ${data.tag}「${data.name || data.ref}」选中「${data.selectedLabel}」（value=${data.selectedValue}，共 ${data.optionCount} 项）`
           return data.committed ? base : `${base}，但页面随后改回了原值，可能有联动校验`
         })
+      },
+    },
+    {
+      name: 'set_element_text',
+      description:
+        'Replace the text content of an element by ref, e.g. to correct a displayed label. Only works on display text: use fill_input for inputs, textareas and contenteditable fields. The change is local and temporary — if the page re-renders it may be reverted, so call get_page_snapshot afterwards to confirm what the user actually sees.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: { type: 'string', description: 'Element ref from get_page_snapshot or find_elements' },
+          text: { type: 'string', description: 'New text (plain text, not HTML); empty string clears it' },
+        },
+        required: ['ref', 'text'],
+        additionalProperties: false,
+      },
+      requiresConfirmation: true,
+      async execute(args): Promise<ToolResult> {
+        const response = await send<SetTextResult>('set_element_text', args)
+        return toResult(response, (data) => {
+          const base = `已修改 ${data.tag}「${data.name || data.ref}」的文本：「${data.previousText}」→「${data.text}」`
+          return data.changed ? base : `${base}（回读值未变化，页面可能拒绝或覆盖了修改）`
+        })
+      },
+    },
+    {
+      name: 'set_element_attribute',
+      description:
+        'Set or remove one attribute on an element by ref. Only presentational attributes are allowed (title, placeholder, aria-*, tabindex, data-*); navigation and behaviour attributes such as href, src, class, id and on* handlers are refused. Pass an empty string to remove the attribute. This is a local DOM change and may be reverted by the page.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: { type: 'string', description: 'Element ref from get_page_snapshot or find_elements' },
+          name: {
+            type: 'string',
+            description: 'Attribute name, e.g. title, aria-label, data-state',
+            maxLength: 60,
+          },
+          value: {
+            type: 'string',
+            description: 'Attribute value; empty string removes the attribute',
+            maxLength: 500,
+          },
+        },
+        required: ['ref', 'name', 'value'],
+        additionalProperties: false,
+      },
+      requiresConfirmation: true,
+      async execute(args): Promise<ToolResult> {
+        const response = await send<SetAttributeResult>('set_element_attribute', args)
+        return toResult(response, (data) =>
+          data.value === null
+            ? `已移除 ${data.tag}「${data.name || data.ref}」的 ${data.attribute} 属性（原值「${data.previousValue ?? ''}」）`
+            : `已把 ${data.tag}「${data.name || data.ref}」的 ${data.attribute} 设为「${data.value}」`,
+        )
+      },
+    },
+    {
+      name: 'set_element_style',
+      description:
+        'Apply a few inline CSS declarations to an element by ref, e.g. hide an overlay or highlight a section. Only a fixed allowlist of visual properties (display, visibility, opacity, color, spacing, borders, size, position) is accepted, and values containing url(), expression() or @import are refused. Use remove_element with mode=hide for a one-shot hide. The page may re-render and revert inline styles.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: { type: 'string', description: 'Element ref from get_page_snapshot or find_elements' },
+          styles: {
+            type: 'object',
+            description:
+              'CSS declarations in kebab-case or camelCase, e.g. {"display":"none","font-size":"14px","borderRadius":"4px"}',
+            additionalProperties: true,
+          },
+        },
+        required: ['ref', 'styles'],
+        additionalProperties: false,
+      },
+      requiresConfirmation: true,
+      async execute(args): Promise<ToolResult> {
+        const response = await send<SetStyleResult>('set_element_style', args)
+        return toResult(response, (data) => {
+          const entries = Object.entries(data.applied)
+            .map(([prop, value]) => `${prop}=${value}`)
+            .join('，')
+          return `已为 ${data.tag}「${data.name || data.ref}」应用 ${entries.length > 0 ? entries : '样式'}`
+        })
+      },
+    },
+    {
+      name: 'remove_element',
+      description:
+        'Remove or hide an element by ref. mode=remove detaches the node from the DOM; mode=hide sets display:none and keeps it in place (default remove). Use it to dismiss overlays, ads or banners that block the task. The page may re-create the node on re-render, so verify with get_page_snapshot afterwards.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: { type: 'string', description: 'Element ref from get_page_snapshot or find_elements' },
+          mode: {
+            type: 'string',
+            enum: ['remove', 'hide'],
+            description: 'remove (default) or hide via display:none',
+          },
+        },
+        required: ['ref'],
+        additionalProperties: false,
+      },
+      requiresConfirmation: true,
+      async execute(args): Promise<ToolResult> {
+        const response = await send<RemoveElementResult>('remove_element', args)
+        return toResult(response, (data) => {
+          if (data.mode === 'hide') {
+            return `已隐藏 ${data.tag}「${data.name || data.ref}」${data.stillVisible ? '，但回读仍可见，页面可能立即覆盖了样式' : ''}`
+          }
+          return `已从页面移除 ${data.tag}「${data.name || data.ref}」${data.removed ? '' : '，但节点仍连接在文档上'}`
+        })
+      },
+    },
+    {
+      name: 'insert_element',
+      description:
+        'Insert a small HTML fragment next to an element by ref. position: before/after place it as a sibling, prepend/append place it as the first/last child. The HTML is sanitised first: scripts, styles, iframes, forms, media, event handlers, javascript: URLs and disallowed tags are stripped. Use it for lightweight layout aids, never to submit data or build interactive controls.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: { type: 'string', description: 'Anchor element ref from get_page_snapshot or find_elements' },
+          position: {
+            type: 'string',
+            enum: ['before', 'after', 'prepend', 'append'] satisfies InsertPosition[],
+            description: 'Where to place the fragment relative to the anchor',
+          },
+          html: {
+            type: 'string',
+            description: 'HTML fragment to insert; dangerous tags and attributes are removed',
+            maxLength: 20000,
+          },
+        },
+        required: ['ref', 'position', 'html'],
+        additionalProperties: false,
+      },
+      requiresConfirmation: true,
+      async execute(args): Promise<ToolResult> {
+        const response = await send<InsertElementResult>('insert_element', args)
+        return toResult(
+          response,
+          (data) =>
+            `已在 ${data.tag}「${data.name || data.ref}」的 ${data.position} 位置插入 ${data.insertedCount} 个元素${data.text ? `，文本「${data.text}」` : ''}`,
+        )
       },
     },
   ]

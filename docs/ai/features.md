@@ -9,10 +9,21 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 - Endpoint normalization: `packages/llm-client/src/endpoint.ts` (`parseEndpoint`)
 - Error mapping: `packages/llm-client/src/errors.ts` (`LLMError`, `httpStatusToLLMError`)
 
+## Page translation from the context menu
+
+- Menu creation and click routing: `apps/chrome-extension/src/background/index.ts` (`requestPageTranslation`)
+- Browser-language detection and the packaged task prompt: `apps/chrome-extension/src/shared/translation.ts` (`resolveBrowserLanguage`, `buildTranslatePageTask`)
+- Side Panel consumption and auto-start: `apps/chrome-extension/src/sidepanel/App.tsx` (`startQueuedTranslate`, `PENDING_TRANSLATE_REQUEST_KEY`) — creates a new session so every run is saved to task history
+
 ## Connection test in settings
 
 - Logic: `packages/llm-client/src/connection-test.ts` (`testConnection`)
 - UI: `apps/chrome-extension/src/options/App.tsx`, `apps/chrome-extension/src/options/ProviderForm.tsx`
+
+## Provider configuration storage
+
+- Load/save providers: `apps/chrome-extension/src/shared/storage.ts` (`loadProviders`, `saveProvider`)
+- API key encryption at rest: `apps/chrome-extension/src/shared/encryption.ts` (`encryptApiKey`, `decryptApiKey`) — AES-GCM with a PBKDF2-derived key and a per-instance salt; legacy plaintext keys are read unchanged and re-encrypted on the next save
 
 ## Agent loop, round limit, and timeout
 
@@ -21,17 +32,19 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 - Tool registry: `packages/agent-core/src/registry.ts` (`ToolRegistry`)
 - Limit storage: `apps/chrome-extension/src/shared/storage.ts` (`loadAgentLimits`, `saveAgentLimits`)
 
-## Browser tools: clicks, forms, scrolling, snapshots, and tabs
+## Browser tools: snapshots, clicks, forms, tabs, and DOM edits
 
 - Tool definitions: `packages/browser-tools/src/tools.ts` (`createBrowserTools`)
-- Result types: `packages/browser-tools/src/types.ts` (`FillResult`, `FillStrategy`, `SelectResult`)
+- Result types: `packages/browser-tools/src/types.ts` (`FillResult`, `FillStrategy`, `SelectResult`, `SetTextResult`, `InsertElementResult`)
 - In-page execution: `apps/chrome-extension/src/content/index.ts`
 - Input injection: `apps/chrome-extension/src/content/input-injection.ts` (`commitText`, `planFillStrategies`, `evaluateFill`) — writes through `execCommand` first, falls back to value setters, then reads the field back before reporting success
+- Declarative DOM edits: `set_element_text`, `set_element_attribute`, `set_element_style`, `remove_element`, `insert_element` — attribute/style allowlists and the HTML sanitiser live in `apps/chrome-extension/src/content/index.ts` (`sanitizeInsertedFragment`, `MUTABLE_ATTRIBUTE_NAMES`, `MUTABLE_STYLE_PROPERTIES`); no arbitrary script execution is exposed
 - Message transport: `apps/chrome-extension/src/shared/browser-transport.ts`
 
 ## Side panel UI and chat interaction
 
 - Main UI: `apps/chrome-extension/src/sidepanel/App.tsx`
+- System prompt and task policies: `apps/chrome-extension/src/sidepanel/App.tsx` (`SYSTEM_PROMPT`) — page translation defaults to in-place DOM edits unless the user asks for a chat reply
 - Task history: `apps/chrome-extension/src/sidepanel/TaskHistory.tsx`
 - Message bubble and tool-call card: `apps/chrome-extension/src/sidepanel/components/`
 

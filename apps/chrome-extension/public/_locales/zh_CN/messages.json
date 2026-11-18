@@ -6,5 +6,9 @@
   "actionTitle": {
     "message": "打开 Web Chat Helper 侧边栏",
     "description": "工具栏按钮的悬浮提示"
+  },
+  "contextMenuTranslatePage": {
+    "message": "翻译当前页面(WebChatHelper)",
+    "description": "网页右键菜单中的整页翻译入口"
   }
 }

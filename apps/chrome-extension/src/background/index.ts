@@ -17,6 +17,12 @@ import type {
 } from 'browser-tools'
 import { BROWSER_ACTION_MESSAGE_TYPES, MESSAGE_TYPES } from '../shared/index'
 import { originPatternFromUrl } from '../shared/permissions'
+import {
+  PENDING_TRANSLATE_REQUEST_KEY,
+  TRANSLATE_PAGE_MENU_ID,
+  resolveBrowserLanguage,
+  type TranslatePageRequest,
+} from '../shared/translation'
 
 // 阶段 1：点击工具栏图标时，打开当前活动标签页的 Side Panel
 // Side Panel 需要 Chrome 114+，且需要 sidePanel 权限
@@ -44,6 +50,77 @@ chrome.action.onClicked.addListener(async (tab) => {
     console.error('[background] 打开 Side Panel 失败:', error)
   }
 })
+
+// ---------------------------------------------------------------------------
+// 右键菜单：翻译当前页面
+// 菜单在安装/更新时创建；点击后先打开 Side Panel（需用户手势），
+// 再把请求写入 session storage 并广播，尚未加载的面板启动后会消费该请求。
+// ---------------------------------------------------------------------------
+
+const TRANSLATE_MENU_TITLE_FALLBACK = '翻译当前页面(WebChatHelper)'
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create(
+    {
+      id: TRANSLATE_PAGE_MENU_ID,
+      title:
+        chrome.i18n.getMessage('contextMenuTranslatePage') || TRANSLATE_MENU_TITLE_FALLBACK,
+      contexts: ['page'],
+      // 受保护页面无法注入 Content Script，菜单只在可操作的 http(s) 页面出现
+      documentUrlPatterns: ['http://*/*', 'https://*/*'],
+    },
+    () => {
+      const error = chrome.runtime.lastError
+      if (error && !error.message?.includes('duplicate')) {
+        console.warn('[background] 创建翻译右键菜单失败:', error.message)
+      }
+    },
+  )
+})
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== TRANSLATE_PAGE_MENU_ID) return
+  void requestPageTranslation(tab)
+})
+
+async function requestPageTranslation(tab?: chrome.tabs.Tab): Promise<void> {
+  const tabId = tab?.id
+  if (tabId === undefined) return
+
+  // sidePanel.open 必须在用户手势中调用，因此放在所有 await 之前
+  let panelOpened = false
+  try {
+    await chrome.sidePanel.open({ tabId })
+    panelOpened = true
+  } catch (error) {
+    console.warn('[background] 打开 Side Panel 失败:', error)
+  }
+
+  const request: TranslatePageRequest = {
+    id: crypto.randomUUID(),
+    tabId,
+    windowId: tab?.windowId,
+    language: resolveBrowserLanguage(),
+    createdAt: Date.now(),
+  }
+
+  if (panelOpened) {
+    try {
+      await chrome.storage.session.set({ [PENDING_TRANSLATE_REQUEST_KEY]: request })
+    } catch (error) {
+      console.warn('[background] 暂存翻译请求失败:', error)
+    }
+  }
+
+  try {
+    await chrome.runtime.sendMessage({
+      type: MESSAGE_TYPES.TRANSLATE_PAGE_REQUEST,
+      payload: request,
+    })
+  } catch {
+    // 没有接收方说明 Side Panel 尚未加载；session storage 中的请求会在加载后消费
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Browser Tools 消息路由

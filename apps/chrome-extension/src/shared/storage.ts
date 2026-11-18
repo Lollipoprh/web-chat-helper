@@ -4,6 +4,7 @@
 
 import { DEFAULT_AGENT_LIMITS, type AgentLimits } from 'agent-core'
 import type { ProviderConfig } from 'llm-client'
+import { decryptInList, encryptInList } from './encryption'
 
 export const PROVIDERS_STORAGE_KEY = 'providers'
 export const DEFAULT_PROVIDER_STORAGE_KEY = 'defaultProviderId'
@@ -20,10 +21,9 @@ export async function loadProviders(): Promise<ProviderConfig[]> {
   const raw = stored[PROVIDERS_STORAGE_KEY]
   if (!Array.isArray(raw)) return []
 
-  return raw
-    .filter(isProviderConfig)
-    .map(normalizeProvider)
-    .sort((a, b) => a.createdAt - b.createdAt)
+  const normalized = raw.filter(isProviderConfig).map(normalizeProvider)
+  const decrypted = await decryptInList(normalized)
+  return decrypted.sort((a, b) => a.createdAt - b.createdAt)
 }
 
 /** 新增或更新（按 id 匹配），返回更新后的完整列表 */
@@ -37,7 +37,7 @@ export async function saveProvider(provider: ProviderConfig): Promise<ProviderCo
     providers.push(provider)
   }
 
-  await chrome.storage.local.set({ [PROVIDERS_STORAGE_KEY]: providers })
+  await chrome.storage.local.set({ [PROVIDERS_STORAGE_KEY]: await encryptInList(providers) })
   return providers
 }
 
@@ -52,7 +52,7 @@ export async function deleteProvider(id: string): Promise<{
     currentDefault === id ? (providers[0]?.id ?? null) : currentDefault
 
   await chrome.storage.local.set({
-    [PROVIDERS_STORAGE_KEY]: providers,
+    [PROVIDERS_STORAGE_KEY]: await encryptInList(providers),
     [DEFAULT_PROVIDER_STORAGE_KEY]: defaultProviderId,
   })
 
