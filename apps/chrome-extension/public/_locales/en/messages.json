@@ -6,5 +6,9 @@
   "actionTitle": {
     "message": "Open the Web Chat Helper side panel",
     "description": "Tooltip for the toolbar button"
+  },
+  "contextMenuTranslatePage": {
+    "message": "Translate current page (WebChatHelper)",
+    "description": "Context menu entry that translates the page in place"
   }
 }

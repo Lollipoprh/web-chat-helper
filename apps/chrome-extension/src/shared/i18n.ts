@@ -26,6 +26,9 @@ const zh = {
   'common.settings': '设置',
 
   'sidepanel.noProvider': '未配置供应商',
+  'sidepanel.translateNeedsToolCalls':
+    '当前供应商未启用 Tool Calls，无法直接修改页面；请在设置中启用后再试',
+  'sidepanel.translateStartFailed': '无法自动启动整页翻译，请在侧边栏中重试',
   'sidepanel.switchSession': '切换会话',
   'sidepanel.newSession': '新建',
   'sidepanel.deleteSession': '删除',
@@ -221,6 +224,9 @@ const en: Record<MessageKey, string> = {
   'common.settings': 'Settings',
 
   'sidepanel.noProvider': 'No provider configured',
+  'sidepanel.translateNeedsToolCalls':
+    'The current provider does not support tool calls, so the page cannot be edited in place. Enable tool calls in settings and try again.',
+  'sidepanel.translateStartFailed': 'Could not start the page translation. Please retry from the side panel.',
   'sidepanel.switchSession': 'Switch session',
   'sidepanel.newSession': 'New',
   'sidepanel.deleteSession': 'Delete',

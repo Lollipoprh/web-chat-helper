@@ -32,6 +32,11 @@ export const MESSAGE_TYPES = {
   VERIFY_ACTION: 'browser-tools:verify_action',
   NAVIGATE_TAB: 'browser-tools:navigate_tab',
   SELECT_OPTION: 'browser-tools:select_option',
+  SET_ELEMENT_TEXT: 'browser-tools:set_element_text',
+  SET_ELEMENT_ATTRIBUTE: 'browser-tools:set_element_attribute',
+  SET_ELEMENT_STYLE: 'browser-tools:set_element_style',
+  REMOVE_ELEMENT: 'browser-tools:remove_element',
+  INSERT_ELEMENT: 'browser-tools:insert_element',
   LIST_TABS: 'browser-tools:list_tabs',
   NEW_TAB: 'browser-tools:new_tab',
   SWITCH_TAB: 'browser-tools:switch_tab',
@@ -45,6 +50,9 @@ export const MESSAGE_TYPES = {
   // 配置消息
   GET_PROVIDER_CONFIG: 'config:get_provider',
   SAVE_PROVIDER_CONFIG: 'config:save_provider',
+
+  // 右键菜单 -> Side Panel：请求就地翻译当前页面
+  TRANSLATE_PAGE_REQUEST: 'translate:page',
 } as const
 
 /** 工具动作 -> 消息类型，避免在两处硬编码字符串 */
@@ -59,6 +67,11 @@ export const BROWSER_ACTION_MESSAGE_TYPES: Record<BrowserAction, string> = {
   verify_action: MESSAGE_TYPES.VERIFY_ACTION,
   navigate_tab: MESSAGE_TYPES.NAVIGATE_TAB,
   select_option: MESSAGE_TYPES.SELECT_OPTION,
+  set_element_text: MESSAGE_TYPES.SET_ELEMENT_TEXT,
+  set_element_attribute: MESSAGE_TYPES.SET_ELEMENT_ATTRIBUTE,
+  set_element_style: MESSAGE_TYPES.SET_ELEMENT_STYLE,
+  remove_element: MESSAGE_TYPES.REMOVE_ELEMENT,
+  insert_element: MESSAGE_TYPES.INSERT_ELEMENT,
   list_tabs: MESSAGE_TYPES.LIST_TABS,
   new_tab: MESSAGE_TYPES.NEW_TAB,
   switch_tab: MESSAGE_TYPES.SWITCH_TAB,

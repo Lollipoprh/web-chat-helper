@@ -1,5 +1,5 @@
 // Content Script：注入到网页中的脚本
-// 职责：读取页面摘要、定位元素、执行点击/输入/滚动等 DOM 操作
+// 职责：读取页面摘要、定位元素、执行点击/输入/滚动，以及声明式的 DOM 修改
 // 运行在 Chrome isolated world，与网页 JS 隔离，无 API Key 访问权限
 //
 // 关键约束：
@@ -13,9 +13,15 @@ import type {
   ElementSummary,
   FillResult,
   FindElementsResult,
+  InsertElementResult,
+  InsertPosition,
   PageSnapshot,
+  RemoveElementResult,
   ScrollResult,
   SelectResult,
+  SetAttributeResult,
+  SetStyleResult,
+  SetTextResult,
   VerifyResult,
   WaitResult,
 } from 'browser-tools'
@@ -786,6 +792,553 @@ async function verifyAction(args: Record<string, unknown>): Promise<VerifyResult
 }
 
 // ---------------------------------------------------------------------------
+// DOM 修改：文本 / 属性 / 样式 / 删除 / 插入
+// 只提供声明式、参数白名单的修改能力：不接受脚本、任意选择器或任意 HTML 属性
+// 所有修改都是临时的本地 DOM 变化，页面 re-render 后可能被覆盖，因此都要回读
+// ---------------------------------------------------------------------------
+
+const MAX_MUTATION_TEXT_CHARS = 4000
+const MAX_ATTRIBUTE_VALUE_CHARS = 500
+const MAX_STYLE_ENTRIES = 20
+const MAX_STYLE_VALUE_CHARS = 200
+const MAX_INSERT_HTML_CHARS = 20_000
+const MAX_INSERTED_ELEMENTS = 200
+const MUTATION_PREVIEW_CHARS = 200
+
+/** 不允许被整体改写、隐藏或移除的节点 */
+const PROTECTED_MUTATION_TAGS = new Set([
+  'html',
+  'head',
+  'body',
+  'script',
+  'style',
+  'title',
+  'meta',
+  'link',
+  'base',
+  'noscript',
+  'template',
+  'iframe',
+  'object',
+  'embed',
+])
+
+/** 插入操作的锚点也不能是这些节点 */
+const PROTECTED_INSERT_ANCHORS = new Set([
+  'html',
+  'head',
+  'script',
+  'style',
+  'title',
+  'meta',
+  'link',
+  'base',
+  'noscript',
+  'template',
+])
+
+/** 允许模型修改的属性：只影响展示与无障碍描述，不改导航或行为 */
+const MUTABLE_ATTRIBUTE_NAMES = new Set([
+  'title',
+  'placeholder',
+  'aria-label',
+  'aria-description',
+  'aria-describedby',
+  'aria-hidden',
+  'aria-expanded',
+  'aria-pressed',
+  'aria-checked',
+  'aria-selected',
+  'aria-disabled',
+  'aria-required',
+  'aria-invalid',
+  'tabindex',
+])
+
+/** 允许模型覆盖的内联样式：纯视觉属性，不含 background-image 之类的加载能力 */
+const MUTABLE_STYLE_PROPERTIES = new Set([
+  'display',
+  'visibility',
+  'opacity',
+  'color',
+  'background-color',
+  'font-size',
+  'font-weight',
+  'font-style',
+  'font-family',
+  'text-decoration',
+  'text-align',
+  'text-transform',
+  'line-height',
+  'letter-spacing',
+  'margin',
+  'margin-top',
+  'margin-right',
+  'margin-bottom',
+  'margin-left',
+  'padding',
+  'padding-top',
+  'padding-right',
+  'padding-bottom',
+  'padding-left',
+  'border',
+  'border-color',
+  'border-width',
+  'border-style',
+  'border-radius',
+  'width',
+  'height',
+  'min-width',
+  'min-height',
+  'max-width',
+  'max-height',
+  'position',
+  'top',
+  'right',
+  'bottom',
+  'left',
+  'z-index',
+  'overflow',
+  'transform',
+  'box-shadow',
+  'cursor',
+])
+
+/** 插入内容允许使用的标签：纯展示与排版，不含表单、媒体与可执行容器 */
+const ALLOWED_INSERT_TAGS = new Set([
+  'div',
+  'span',
+  'p',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'strong',
+  'em',
+  'b',
+  'i',
+  'u',
+  's',
+  'small',
+  'sub',
+  'sup',
+  'mark',
+  'br',
+  'hr',
+  'a',
+  'img',
+  'ul',
+  'ol',
+  'li',
+  'dl',
+  'dt',
+  'dd',
+  'blockquote',
+  'pre',
+  'code',
+  'table',
+  'thead',
+  'tbody',
+  'tfoot',
+  'tr',
+  'td',
+  'th',
+  'caption',
+  'section',
+  'article',
+  'header',
+  'footer',
+  'nav',
+  'aside',
+  'figure',
+  'figcaption',
+  'time',
+])
+
+/** 插入内容中直接连子树一起丢弃的标签 */
+const DANGEROUS_INSERT_TAGS = new Set([
+  'script',
+  'style',
+  'iframe',
+  'frame',
+  'frameset',
+  'object',
+  'embed',
+  'applet',
+  'link',
+  'meta',
+  'base',
+  'form',
+  'input',
+  'button',
+  'select',
+  'textarea',
+  'option',
+  'video',
+  'audio',
+  'source',
+  'track',
+  'canvas',
+  'svg',
+  'math',
+  'template',
+  'dialog',
+])
+
+const ALLOWED_INSERT_ATTRIBUTES = new Set([
+  'class',
+  'style',
+  'title',
+  'alt',
+  'width',
+  'height',
+  'colspan',
+  'rowspan',
+  'href',
+  'src',
+  'target',
+  'rel',
+  'role',
+  'dir',
+  'lang',
+  'datetime',
+  'cite',
+  'start',
+])
+
+function resolveMutationTarget(ref: string): Element {
+  const element = resolveElement(ref)
+  const tag = element.tagName.toLowerCase()
+  if (PROTECTED_MUTATION_TAGS.has(tag)) {
+    throw new PageToolError('invalid_args', `不允许修改或移除 <${tag}> 元素`)
+  }
+  return element
+}
+
+function mutationPreview(text: string): string {
+  return collapse(text).slice(0, MUTATION_PREVIEW_CHARS)
+}
+
+function isFormTextField(element: Element): boolean {
+  if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement ||
+    element instanceof HTMLSelectElement
+  ) {
+    return true
+  }
+  const editable = element.getAttribute('contenteditable')
+  return editable !== null && editable !== 'false'
+}
+
+function isMutableAttributeName(name: string): boolean {
+  return MUTABLE_ATTRIBUTE_NAMES.has(name) || /^data-[a-z0-9._-]+$/.test(name)
+}
+
+function toKebabCase(name: string): string {
+  return name
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .toLowerCase()
+}
+
+/** 拒绝可加载外部资源或执行表达式的 CSS 值 */
+function isUnsafeCssValue(value: string): boolean {
+  return /url\s*\(|expression\s*\(|@import|javascript:/i.test(value)
+}
+
+/** 只放行 http(s)、mailto、tel、相对路径与内联图片 data URI */
+function isUnsafeUrlValue(name: string, value: string): boolean {
+  const trimmed = value.trim()
+  if (!trimmed) return false
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(trimmed)?.[1]?.toLowerCase()
+  if (!scheme) return false
+  if (scheme === 'http' || scheme === 'https' || scheme === 'mailto' || scheme === 'tel') return false
+  if (name === 'src' && /^data:image\/(png|jpe?g|gif|webp|avif);/i.test(trimmed)) return false
+  return true
+}
+
+function setElementText(args: Record<string, unknown>): SetTextResult {
+  const ref = readString(args, 'ref')
+  if (!ref) throw new PageToolError('invalid_args', '缺少参数 ref')
+  const text = readRawString(args, 'text')
+  if (text === undefined) throw new PageToolError('invalid_args', '缺少参数 text')
+  if (text.length > MAX_MUTATION_TEXT_CHARS) {
+    throw new PageToolError('invalid_args', `text 不能超过 ${MAX_MUTATION_TEXT_CHARS} 字符`)
+  }
+
+  const element = resolveMutationTarget(ref)
+  if (isFormTextField(element)) {
+    throw new PageToolError(
+      'invalid_args',
+      `元素 ${ref} 是表单文本控件，请使用 fill_input 修改其值`,
+    )
+  }
+
+  const previousText = mutationPreview(element.textContent ?? '')
+  element.textContent = text
+  const actualText = mutationPreview(element.textContent ?? '')
+
+  return {
+    ref,
+    tag: element.tagName.toLowerCase(),
+    name: elementName(element),
+    url: location.href,
+    previousText,
+    text: actualText,
+    changed: previousText !== actualText,
+  }
+}
+
+function setElementAttribute(args: Record<string, unknown>): SetAttributeResult {
+  const ref = readString(args, 'ref')
+  if (!ref) throw new PageToolError('invalid_args', '缺少参数 ref')
+  const rawName = readString(args, 'name')
+  if (!rawName) throw new PageToolError('invalid_args', '缺少参数 name')
+  const attribute = rawName.toLowerCase()
+  if (!isMutableAttributeName(attribute)) {
+    throw new PageToolError(
+      'invalid_args',
+      `不允许修改属性 ${rawName}；仅支持 title、placeholder、aria-*、tabindex 和 data-*`,
+    )
+  }
+  const value = readRawString(args, 'value')
+  if (value === undefined) throw new PageToolError('invalid_args', '缺少参数 value')
+  if (value.length > MAX_ATTRIBUTE_VALUE_CHARS) {
+    throw new PageToolError('invalid_args', `value 不能超过 ${MAX_ATTRIBUTE_VALUE_CHARS} 字符`)
+  }
+
+  const element = resolveMutationTarget(ref)
+  const previousValue = element.getAttribute(attribute)
+  if (value === '') element.removeAttribute(attribute)
+  else element.setAttribute(attribute, value)
+
+  return {
+    ref,
+    tag: element.tagName.toLowerCase(),
+    name: elementName(element),
+    url: location.href,
+    attribute,
+    previousValue,
+    value: element.getAttribute(attribute),
+  }
+}
+
+function setElementStyle(args: Record<string, unknown>): SetStyleResult {
+  const ref = readString(args, 'ref')
+  if (!ref) throw new PageToolError('invalid_args', '缺少参数 ref')
+  const rawStyles = args.styles
+  if (!isPlainObject(rawStyles)) {
+    throw new PageToolError('invalid_args', '参数 styles 必须是对象')
+  }
+  const entries = Object.entries(rawStyles)
+  if (entries.length === 0) throw new PageToolError('invalid_args', 'styles 至少需要一个样式声明')
+  if (entries.length > MAX_STYLE_ENTRIES) {
+    throw new PageToolError('invalid_args', `styles 最多 ${MAX_STYLE_ENTRIES} 项`)
+  }
+
+  const element = resolveMutationTarget(ref)
+  if (!(element instanceof HTMLElement || element instanceof SVGElement)) {
+    throw new PageToolError('invalid_args', `元素 ${ref} 不支持内联样式`)
+  }
+
+  const applied: Record<string, string> = {}
+  for (const [rawProp, rawValue] of entries) {
+    const prop = toKebabCase(rawProp)
+    if (!MUTABLE_STYLE_PROPERTIES.has(prop)) {
+      throw new PageToolError('invalid_args', `不允许修改样式 ${rawProp}`)
+    }
+    const value = typeof rawValue === 'number' ? String(rawValue) : rawValue
+    if (typeof value !== 'string') {
+      throw new PageToolError('invalid_args', `样式 ${rawProp} 的值必须是字符串或数字`)
+    }
+    const trimmed = value.trim()
+    if (!trimmed) throw new PageToolError('invalid_args', `样式 ${rawProp} 的值不能为空`)
+    if (trimmed.length > MAX_STYLE_VALUE_CHARS) {
+      throw new PageToolError('invalid_args', `样式 ${rawProp} 的值不能超过 ${MAX_STYLE_VALUE_CHARS} 字符`)
+    }
+    if (isUnsafeCssValue(trimmed)) {
+      throw new PageToolError('invalid_args', `样式 ${rawProp} 的值包含不允许的写法`)
+    }
+    element.style.setProperty(prop, trimmed)
+    applied[prop] = trimmed
+  }
+
+  const computedStyle = window.getComputedStyle(element)
+  const computed: Record<string, string> = {}
+  for (const prop of Object.keys(applied)) {
+    computed[prop] = computedStyle.getPropertyValue(prop).trim()
+  }
+
+  return {
+    ref,
+    tag: element.tagName.toLowerCase(),
+    name: elementName(element),
+    url: location.href,
+    applied,
+    computed,
+  }
+}
+
+function removeElement(args: Record<string, unknown>): RemoveElementResult {
+  const ref = readString(args, 'ref')
+  if (!ref) throw new PageToolError('invalid_args', '缺少参数 ref')
+  const rawMode = readString(args, 'mode') ?? 'remove'
+  if (rawMode !== 'remove' && rawMode !== 'hide') {
+    throw new PageToolError('invalid_args', 'mode 只能是 remove 或 hide')
+  }
+
+  const element = resolveMutationTarget(ref)
+  const tag = element.tagName.toLowerCase()
+  const name = elementName(element)
+
+  if (rawMode === 'hide') {
+    if (!(element instanceof HTMLElement || element instanceof SVGElement)) {
+      throw new PageToolError('invalid_args', `元素 ${ref} 不支持隐藏`)
+    }
+    element.style.setProperty('display', 'none', 'important')
+    return {
+      ref,
+      tag,
+      name,
+      url: location.href,
+      mode: 'hide',
+      removed: false,
+      stillVisible: isVisible(element),
+    }
+  }
+
+  element.remove()
+  return {
+    ref,
+    tag,
+    name,
+    url: location.href,
+    mode: 'remove',
+    removed: !element.isConnected,
+    stillVisible: false,
+  }
+}
+
+/**
+ * 消毒插入片段：
+ *   - 危险标签连同子树一起丢弃
+ *   - 非白名单标签保留子节点、去掉自身
+ *   - 属性只保留白名单 / aria-* / data-*，并剔除事件、脚本 URL 与危险 CSS
+ */
+function sanitizeInsertedFragment(html: string): DocumentFragment {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  const root = template.content
+
+  for (const element of Array.from(root.querySelectorAll('*'))) {
+    // 父节点已被丢弃时，子树一并跳过
+    if (element.getRootNode() !== root) continue
+    const tag = element.tagName.toLowerCase()
+
+    if (DANGEROUS_INSERT_TAGS.has(tag)) {
+      element.remove()
+      continue
+    }
+    if (!ALLOWED_INSERT_TAGS.has(tag)) {
+      const parent = element.parentNode
+      if (!parent) continue
+      let child = element.firstChild
+      while (child) {
+        parent.insertBefore(child, element)
+        child = element.firstChild
+      }
+      parent.removeChild(element)
+      continue
+    }
+
+    for (const attribute of Array.from(element.attributes)) {
+      const name = attribute.name.toLowerCase()
+      const allowed =
+        ALLOWED_INSERT_ATTRIBUTES.has(name) ||
+        name.startsWith('aria-') ||
+        name.startsWith('data-')
+      if (!allowed) {
+        element.removeAttribute(attribute.name)
+        continue
+      }
+      if (name === 'style' && isUnsafeCssValue(attribute.value)) {
+        element.removeAttribute(attribute.name)
+        continue
+      }
+      if ((name === 'href' || name === 'src') && isUnsafeUrlValue(name, attribute.value)) {
+        element.removeAttribute(attribute.name)
+      }
+    }
+  }
+
+  const count = root.querySelectorAll('*').length
+  if (count > MAX_INSERTED_ELEMENTS) {
+    throw new PageToolError('invalid_args', `消毒后的内容包含 ${count} 个元素，超过上限 ${MAX_INSERTED_ELEMENTS}`)
+  }
+  return root
+}
+
+function insertElement(args: Record<string, unknown>): InsertElementResult {
+  const ref = readString(args, 'ref')
+  if (!ref) throw new PageToolError('invalid_args', '缺少参数 ref')
+  const rawPosition = readString(args, 'position')
+  if (
+    rawPosition !== 'before' &&
+    rawPosition !== 'after' &&
+    rawPosition !== 'prepend' &&
+    rawPosition !== 'append'
+  ) {
+    throw new PageToolError('invalid_args', 'position 只能是 before、after、prepend 或 append')
+  }
+  const html = readRawString(args, 'html')
+  if (html === undefined) throw new PageToolError('invalid_args', '缺少参数 html')
+  if (html.length > MAX_INSERT_HTML_CHARS) {
+    throw new PageToolError('invalid_args', `html 不能超过 ${MAX_INSERT_HTML_CHARS} 字符`)
+  }
+
+  const anchor = resolveElement(ref)
+  const anchorTag = anchor.tagName.toLowerCase()
+  if (PROTECTED_INSERT_ANCHORS.has(anchorTag)) {
+    throw new PageToolError('invalid_args', `不允许向 <${anchorTag}> 插入内容`)
+  }
+
+  const position = rawPosition as InsertPosition
+  const fragment = sanitizeInsertedFragment(html)
+  const insertedCount = fragment.querySelectorAll('*').length
+  if (insertedCount === 0) {
+    throw new PageToolError('invalid_args', '消毒后没有可插入的元素内容')
+  }
+  const text = mutationPreview(fragment.textContent ?? '')
+
+  if (position === 'before' || position === 'after') {
+    const parent = anchor.parentNode
+    if (!parent) throw new PageToolError('execution_failed', `锚点 ${ref} 没有父节点`)
+    const parentTag = parent instanceof Element ? parent.tagName.toLowerCase() : ''
+    if (parentTag === 'html' || parentTag === 'head') {
+      throw new PageToolError('invalid_args', `不允许在 <${parentTag}> 下插入同级内容`)
+    }
+    parent.insertBefore(fragment, position === 'before' ? anchor : anchor.nextSibling)
+  } else if (position === 'prepend') {
+    anchor.insertBefore(fragment, anchor.firstChild)
+  } else {
+    anchor.appendChild(fragment)
+  }
+
+  return {
+    ref,
+    tag: anchorTag,
+    name: elementName(anchor),
+    url: location.href,
+    position,
+    insertedCount,
+    text,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 参数读取
 // ---------------------------------------------------------------------------
 
@@ -832,6 +1385,11 @@ const handlers: Record<string, ActionHandler> = {
   [MESSAGE_TYPES.CLICK_ELEMENT]: (args) => clickElement(args),
   [MESSAGE_TYPES.FILL_INPUT]: (args) => fillInput(args),
   [MESSAGE_TYPES.SELECT_OPTION]: (args) => selectOption(args),
+  [MESSAGE_TYPES.SET_ELEMENT_TEXT]: (args) => setElementText(args),
+  [MESSAGE_TYPES.SET_ELEMENT_ATTRIBUTE]: (args) => setElementAttribute(args),
+  [MESSAGE_TYPES.SET_ELEMENT_STYLE]: (args) => setElementStyle(args),
+  [MESSAGE_TYPES.REMOVE_ELEMENT]: (args) => removeElement(args),
+  [MESSAGE_TYPES.INSERT_ELEMENT]: (args) => insertElement(args),
   [MESSAGE_TYPES.SCROLL_PAGE]: (args) => scrollPage(args),
   [MESSAGE_TYPES.WAIT_FOR_ELEMENT]: (args) => waitForElement(args),
   [MESSAGE_TYPES.VERIFY_ACTION]: (args) => verifyAction(args),

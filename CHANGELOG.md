@@ -10,6 +10,46 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added / 新增
+
+- **Context-menu page translation** — a "翻译当前页面(WebChatHelper)" right-click entry opens
+  the Side Panel and immediately runs a packaged in-place translation task in a new session.
+  The target language is the current browser UI language (`chrome.i18n.getUILanguage()`), and
+  every run is saved to session history.
+  **右键整页翻译** —— 网页右键菜单新增「翻译当前页面(WebChatHelper)」，点击后自动打开
+  Side Panel 并在新会话中执行封装好的就地翻译任务；目标语言取当前浏览器界面语言
+  （`chrome.i18n.getUILanguage()`），每次执行都会保存到会话记录。
+- **Declarative DOM edit tools** — `set_element_text`, `set_element_attribute`,
+  `set_element_style`, `remove_element` and `insert_element` in
+  `packages/browser-tools/src/tools.ts`, executed by the content script. Attribute and
+  style names go through strict allowlists; inserted HTML is sanitised (no scripts,
+  iframes, forms, media, `on*` handlers or `javascript:` URLs) and every mutation is read
+  back. No arbitrary script execution is exposed.
+  **声明式 DOM 修改工具** —— `set_element_text`、`set_element_attribute`、
+  `set_element_style`、`remove_element`、`insert_element`，由 content script 执行。
+  属性与样式走严格白名单；插入的 HTML 会先消毒（剔除 script、iframe、表单、媒体、
+  `on*` 事件与 `javascript:` URL），每次修改都回读确认；不暴露任意脚本执行能力。
+- **API key encryption at rest** — provider keys are stored as
+  `enc:v1:` AES-GCM ciphertext derived from a static master key plus a per-instance salt
+  (`apps/chrome-extension/src/shared/encryption.ts`). Legacy plaintext keys still load and
+  are encrypted on the next save. This is obfuscation against casual inspection of
+  `chrome.storage.local`, not a key vault.
+  **API Key 落盘加密** —— provider key 以 `enc:v1:` 前缀的 AES-GCM 密文存储，
+  密钥由静态主密钥加实例级 salt 派生（`apps/chrome-extension/src/shared/encryption.ts`）。
+  老的明文 key 仍可读取，并在下次保存时自动加密。该方案用于抵御对
+  `chrome.storage.local` 的随手查看，并非密钥保险库。
+
+### Changed / 变更
+
+- **Page translation defaults to in-place editing** — the system prompt now tells the model to
+  translate visible page text with `find_elements` + `set_element_text` when the user does not
+  ask for a chat reply, editing only text-only leaf elements. A chat answer is used only when the
+  user explicitly asks for one, or when the page is protected, unauthorized or keeps reverting
+  the edits.
+  **整页翻译默认就地改页面** —— 当用户没有要求"在对话框里回复"时，系统提示词让模型用
+  `find_elements` + `set_element_text` 直接替换页面可见文本，且只改写纯文本叶子节点；
+  仅在用户明确要求对话回复、页面受保护/未授权、或页面持续回滚修改时才改为在聊天中给出译文。
+
 ## [0.1.3] - 2026-11-10
 
 ### Added / 新增
