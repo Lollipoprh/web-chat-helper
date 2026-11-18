@@ -10,6 +10,8 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-18
+
 ### Added / 新增
 
 - **Context-menu page translation** — a "翻译当前页面(WebChatHelper)" right-click entry opens
@@ -289,7 +291,8 @@ model continues decision or gives the final answer.
   may still change. Check future release notes before upgrading.
   首个版本，供应商配置结构、跨上下文消息协议与工具参数仍可能调整，升级前请留意后续变更说明。
 
-[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.4
 [0.1.3]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.3
 [0.1.2]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.1
