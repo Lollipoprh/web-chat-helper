@@ -3,15 +3,18 @@ import {
   useEffect,
   useRef,
   useState,
+  type DragEvent,
   type KeyboardEvent,
 } from 'react'
 import {
+  DEFAULT_CONTEXT_WINDOW,
   LLMError,
   createChatCompletion,
   parseEndpoint,
   streamChatCompletion,
   type ChatMessage as LlmChatMessage,
   type ProviderConfig,
+  type TokenUsage,
 } from 'llm-client'
 import {
   ToolRegistry,
@@ -23,6 +26,7 @@ import {
 import { createBrowserTools } from 'browser-tools'
 import { createFileTools } from './file-tools'
 import {
+  addSessionUsage,
   appendSessionMessage,
   clearSessionMessages,
   createSession,
@@ -73,9 +77,12 @@ import TaskHistory from './TaskHistory'
 import { MessageBubble, type MessageStatus } from './components/MessageBubble'
 import { ModelPicker } from './components/ModelPicker'
 import { ToolEventItem } from './components/ToolEventItem'
+import { UsageMeter } from './components/UsageMeter'
 import { Alert, Button, Select, TextArea, color, fontSize, radius, space } from '../ui'
 import {
   bindFile,
+  bindFileHandle,
+  deleteSessionFiles,
   listBoundFiles,
   unbindFile,
   type BoundFileMeta,
@@ -160,10 +167,15 @@ export default function App() {
   const [expandedToolEvents, setExpandedToolEvents] = useState<Set<string>>(
     () => new Set(),
   )
-  // 文件管理：已绑定的本地文件列表
+  // 文件管理：当前会话绑定的本地文件列表
   const [boundFiles, setBoundFiles] = useState<BoundFileMeta[]>([])
-  // 是否展开文件管理面板
-  const [showFileManager, setShowFileManager] = useState(false)
+  // 当前会话累计 token 用量，用于标题栏下方的用量条
+  const [tokenUsage, setTokenUsage] = useState<{ inputTokens: number; outputTokens: number }>({
+    inputTokens: 0,
+    outputTokens: 0,
+  })
+  // 拖拽文件到会话框/输入框时的高亮提示
+  const [dragActive, setDragActive] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -219,10 +231,21 @@ export default function App() {
           loadSkipConfirm(),
           loadAgentLimits(),
         ])
-        const stored = await loadSessionMessages(initial.activeSessionId)
+        const [stored, files] = await Promise.all([
+          loadSessionMessages(initial.activeSessionId),
+          listBoundFiles(initial.activeSessionId),
+        ])
+        const active = initial.sessions.find(
+          (session) => session.sessionId === initial.activeSessionId,
+        )
         setSessions(initial.sessions)
         setActiveSessionId(initial.activeSessionId)
         setMessages(stored.map(toUiMessage))
+        setBoundFiles(files)
+        setTokenUsage({
+          inputTokens: active?.inputTokens ?? 0,
+          outputTokens: active?.outputTokens ?? 0,
+        })
         if (checkpoint) setInterruptedCheckpoint(checkpoint)
         setSkipConfirm(skip)
         setAgentLimits(limits)
@@ -329,6 +352,7 @@ export default function App() {
     setBanner(null)
     setPendingPageOrigin(null)
     setPendingConfirmation(null)
+    setTokenUsage({ inputTokens: 0, outputTokens: 0 })
     await Promise.all([clearSessionMessages(activeSessionId), clearAgentCheckpoint()])
     setInterruptedCheckpoint(null)
     void refreshSessions()
@@ -343,8 +367,17 @@ export default function App() {
       setBanner(null)
       setPendingPageOrigin(null)
       try {
-        const stored = await loadSessionMessages(sessionId)
+        const [stored, files] = await Promise.all([
+          loadSessionMessages(sessionId),
+          listBoundFiles(sessionId),
+        ])
+        const target = sessions.find((session) => session.sessionId === sessionId)
         setMessages(stored.map(toUiMessage))
+        setBoundFiles(files)
+        setTokenUsage({
+          inputTokens: target?.inputTokens ?? 0,
+          outputTokens: target?.outputTokens ?? 0,
+        })
         setActiveSessionId(sessionId)
         await saveActiveSessionId(sessionId)
       } catch (error) {
@@ -354,7 +387,7 @@ export default function App() {
         setHistoryLoaded(true)
       }
     },
-    [generating, historyLoaded, activeSessionId, t],
+    [generating, historyLoaded, activeSessionId, sessions, t],
   )
 
   const handleNewSession = useCallback(async () => {
@@ -365,6 +398,8 @@ export default function App() {
       setActiveSessionId(session.sessionId)
       await saveActiveSessionId(session.sessionId)
       setMessages([])
+      setBoundFiles([])
+      setTokenUsage({ inputTokens: 0, outputTokens: 0 })
       setBanner(null)
       setPendingPageOrigin(null)
       setPendingConfirmation(null)
@@ -383,6 +418,7 @@ export default function App() {
     try {
       await Promise.all([
         deleteSession(activeSessionId),
+        deleteSessionFiles(activeSessionId),
         deleteTasksForSession(activeSessionId),
       ])
       const remaining = sessions.filter((session) => session.sessionId !== activeSessionId)
@@ -390,8 +426,16 @@ export default function App() {
       setSessions(remaining.length > 0 ? remaining : [next])
       setActiveSessionId(next.sessionId)
       await saveActiveSessionId(next.sessionId)
-      const stored = await loadSessionMessages(next.sessionId)
+      const [stored, files] = await Promise.all([
+        loadSessionMessages(next.sessionId),
+        listBoundFiles(next.sessionId),
+      ])
       setMessages(stored.map(toUiMessage))
+      setBoundFiles(files)
+      setTokenUsage({
+        inputTokens: next.inputTokens ?? 0,
+        outputTokens: next.outputTokens ?? 0,
+      })
       setView('chat')
       setBanner(null)
     } catch (error) {
@@ -443,20 +487,21 @@ export default function App() {
     setSkipConfirm(next)
   }, [skipConfirm, t])
 
-  // 刷新已绑定文件列表
-  const refreshBoundFiles = useCallback(async () => {
+  // 刷新当前会话已绑定的文件列表
+  const refreshBoundFiles = useCallback(async (sessionId: string) => {
     try {
-      setBoundFiles(await listBoundFiles())
+      setBoundFiles(await listBoundFiles(sessionId))
     } catch (error) {
       console.warn('[file] 读取已绑定文件列表失败', error)
     }
   }, [])
 
-  // 绑定新文件：弹出系统文件选择器，以文件名作为绑定键
-  const handleBindFile = useCallback(async () => {
+  // 添加文件：弹出系统文件选择器，绑定到当前会话
+  const handleAddFile = useCallback(async () => {
+    if (!activeSessionId) return
     try {
-      const record = await bindFile()
-      await refreshBoundFiles()
+      const record = await bindFile(activeSessionId)
+      await refreshBoundFiles(activeSessionId)
       setBanner(t('sidepanel.fileBound', { name: record.name }))
     } catch (error) {
       const message =
@@ -465,30 +510,77 @@ export default function App() {
       if (message.includes('aborted') || message.includes('cancel')) return
       setBanner(message)
     }
-  }, [refreshBoundFiles, t])
+  }, [activeSessionId, refreshBoundFiles, t])
 
-  // 解绑文件
+  // 解绑当前会话中的文件
   const handleUnbindFile = useCallback(
     async (name: string) => {
+      if (!activeSessionId) return
       try {
-        await unbindFile(name)
-        await refreshBoundFiles()
+        await unbindFile(activeSessionId, name)
+        await refreshBoundFiles(activeSessionId)
       } catch (error) {
         console.warn('[file] 解绑文件失败', error)
         setBanner(t('sidepanel.unbindFileFailed'))
       }
     },
-    [refreshBoundFiles, t],
+    [activeSessionId, refreshBoundFiles, t],
   )
 
-  // 展开文件管理面板时刷新列表
-  const toggleFileManager = useCallback(() => {
-    setShowFileManager((current) => {
-      const next = !current
-      if (next) void refreshBoundFiles()
-      return next
+  // 拖拽文件到会话框/输入框时高亮提示，松开后按会话绑定
+  function handleFileDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!hasFilePayload(event) || generating) return
+    // 必须阻止默认行为，浏览器才允许 drop
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    setDragActive(true)
+  }
+
+  function handleFileDragLeave(event: DragEvent<HTMLDivElement>) {
+    // 在子元素之间移动时 relatedTarget 仍在容器内，不熄灭高亮
+    const next = event.relatedTarget as Node | null
+    if (next && event.currentTarget.contains(next)) return
+    setDragActive(false)
+  }
+
+  function handleFileDrop(event: DragEvent<HTMLDivElement>) {
+    if (!hasFilePayload(event)) return
+    event.preventDefault()
+    setDragActive(false)
+    if (generating || !activeSessionId) return
+
+    const targetSession = activeSessionId
+    // getAsFileSystemHandle 依赖 drop 的用户手势，必须在同步阶段一次性发起
+    const pending = Array.from(event.dataTransfer.items)
+      .filter((item) => item.kind === 'file')
+      .map(readDroppedFileHandle)
+
+    void Promise.all(pending).then(async (handles) => {
+      const valid = handles.filter(
+        (handle): handle is FileSystemFileHandle => handle !== null,
+      )
+      if (valid.length === 0) {
+        setBanner(t('sidepanel.dropFileUnsupported'))
+        return
+      }
+
+      let bound = 0
+      for (const handle of valid) {
+        try {
+          await bindFileHandle(targetSession, handle)
+          bound += 1
+        } catch (error) {
+          console.warn('[file] 拖拽绑定文件失败', error)
+        }
+      }
+
+      if (bound === 0) {
+        setBanner(t('sidepanel.dropFileFailed'))
+        return
+      }
+      await refreshBoundFiles(targetSession)
     })
-  }, [refreshBoundFiles])
+  }
 
   async function handleSend(
     textOverride?: string,
@@ -591,6 +683,8 @@ export default function App() {
     let assistantContent = ''
     let assistantStatus: MessageStatus = 'streaming'
     let assistantError: string | undefined
+    // 本轮任务消耗的 token，任务结束后累加到会话统计
+    let runUsage: TokenUsage | null = null
 
     const finalize = (status: MessageStatus, error?: string) => {
       assistantStatus = status
@@ -656,7 +750,7 @@ export default function App() {
         })
         const registry = new ToolRegistry()
         const browserTools = createBrowserTools(transport)
-        const fileTools = createFileTools()
+        const fileTools = createFileTools(sessionId)
         // 只读工具在超限时会被优先淘汰，因此记录该标记供日志层使用
         const readOnlyNames = new Set(
           [...browserTools, ...fileTools]
@@ -723,6 +817,8 @@ export default function App() {
           },
         })
 
+        runUsage = result.usage ?? null
+
         taskStatus =
           result.stopReason === 'completed' || result.stopReason === 'round_limit'
             ? 'completed'
@@ -766,9 +862,11 @@ export default function App() {
         }
 
         if (provider.supportsStreaming) {
-          await streamChatCompletion(request, appendDelta)
+          const result = await streamChatCompletion(request, appendDelta)
+          runUsage = result.usage ?? null
         } else {
           const result = await createChatCompletion(request)
+          runUsage = result.usage ?? null
           assistantContent = result.content
           setMessages((prev) =>
             prev.map((message) =>
@@ -793,8 +891,35 @@ export default function App() {
       abortRef.current = null
       confirmResolverRef.current = null
       setPendingConfirmation(null)
+
+      // 会话内累计 token 用量：会话记录持久化，界面同步累加
+      if (runUsage && (runUsage.promptTokens > 0 || runUsage.completionTokens > 0)) {
+        const applied = runUsage
+        setTokenUsage((prev) => ({
+          inputTokens: prev.inputTokens + applied.promptTokens,
+          outputTokens: prev.outputTokens + applied.completionTokens,
+        }))
+        setSessions((prev) =>
+          prev.map((session) =>
+            session.sessionId === sessionId
+              ? {
+                  ...session,
+                  inputTokens: (session.inputTokens ?? 0) + applied.promptTokens,
+                  outputTokens: (session.outputTokens ?? 0) + applied.completionTokens,
+                }
+              : session,
+          ),
+        )
+        // 先落盘再让 refreshSessions 读取，避免用量被旧记录覆盖
+        try {
+          await addSessionUsage(sessionId, applied.promptTokens, applied.completionTokens)
+        } catch (error) {
+          console.warn('[session] 写入 token 用量失败', error)
+        }
+      }
+
       // 任务可能写过绑定文件，结束后刷新文件列表的大小/修改时间
-      void refreshBoundFiles()
+      void refreshBoundFiles(sessionId)
       // 任务正常结束（含取消/错误）后清除检查点；只有意外关闭 Side Panel 时会留下
       void clearAgentCheckpoint()
       // 助手回复结束后一次性落盘；取消与失败的内容也保留，便于回看
@@ -962,29 +1087,32 @@ export default function App() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <header
         style={{
-          padding: '10px 14px',
+          padding: '6px 12px',
           borderBottom: `1px solid ${color.border}`,
           display: 'flex',
           alignItems: 'center',
           gap: 8,
         }}
       >
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>Web Chat Helper</div>
-          <div
-            style={{
-              fontSize: 11,
-              color: color.textFaint,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {provider ? `${provider.name} · ${provider.model}` : t('sidepanel.noProvider')}
-          </div>
+        <div style={{ minWidth: 0, flex: 1, fontSize: 13, fontWeight: 600 }}>
+          Web Chat Helper
         </div>
-        <Button variant="secondary" size="sm" onClick={openOptions}>
-          {t('common.settings')}
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={openOptions}
+          title={t('common.settings')}
+          aria-label={t('common.settings')}
+          style={{
+            width: 26,
+            height: 26,
+            padding: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <GearIcon />
         </Button>
       </header>
 
@@ -1032,64 +1160,13 @@ export default function App() {
         >
           {t('sidepanel.clearChat')}
         </Button>
-        <Button size="sm" onClick={toggleFileManager}>
-          {showFileManager ? t('sidepanel.filesHide') : t('sidepanel.files')}
-        </Button>
       </div>
 
-      {showFileManager && (
-        <Alert tone="info" flush style={{ padding: '10px 14px' }}>
-          <div style={{ fontWeight: 600, marginBottom: space.md }}>
-            {t('sidepanel.fileManagerTitle')}
-          </div>
-          <div style={{ marginBottom: space.md }}>
-            <Button variant="primary" size="sm" onClick={() => void handleBindFile()}>
-              {t('sidepanel.bindFile')}
-            </Button>
-          </div>
-          {boundFiles.length === 0 ? (
-            <div style={{ color: color.textMuted, fontSize: fontSize.xs }}>
-              {t('sidepanel.noFiles')}
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: space.xs }}>
-              {boundFiles.map((file) => (
-                <div
-                  key={file.name}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: space.sm,
-                    padding: '4px 6px',
-                    background: color.surface,
-                    border: `1px solid ${color.infoBorder}`,
-                    borderRadius: radius.sm,
-                  }}
-                >
-                  <span
-                    style={{
-                      color: color.infoText,
-                      flex: 1,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {file.name}（{formatFileSize(file.size)}）
-                  </span>
-                  <Button
-                    variant="danger"
-                    size="xs"
-                    onClick={() => void handleUnbindFile(file.name)}
-                  >
-                    {t('sidepanel.unbind')}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </Alert>
-      )}
+      <UsageMeter
+        inputTokens={tokenUsage.inputTokens}
+        outputTokens={tokenUsage.outputTokens}
+        contextWindow={provider?.contextWindow ?? DEFAULT_CONTEXT_WINDOW}
+      />
 
       {banner && (
         <Alert tone="error" flush style={{ padding: '8px 14px' }}>
@@ -1187,6 +1264,9 @@ export default function App() {
       <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
         {/* 对话栏：默认显示，展开任务记录时整体向左滑出 */}
         <div
+          onDragOver={handleFileDragOver}
+          onDragLeave={handleFileDragLeave}
+          onDrop={handleFileDrop}
           style={{
             position: 'absolute',
             inset: 0,
@@ -1195,6 +1275,7 @@ export default function App() {
             background: color.surface,
             transform: view === 'history' ? 'translateX(-100%)' : 'translateX(0)',
             transition: 'transform 240ms ease',
+            boxShadow: dragActive ? `inset 0 0 0 2px ${color.primary}` : undefined,
           }}
         >
           {/* 消息区单独成层，侧拉按钮以此为基准垂直居中，不因输入框而偏移 */}
@@ -1277,6 +1358,87 @@ export default function App() {
           </div>
 
           <footer style={{ padding: 10, borderTop: `1px solid ${color.border}` }}>
+            {dragActive && (
+              <div
+                style={{
+                  marginBottom: 6,
+                  padding: '4px 8px',
+                  borderRadius: radius.sm,
+                  background: color.surfaceSubtle,
+                  color: color.textSecondary,
+                  fontSize: fontSize.xs,
+                  textAlign: 'center',
+                }}
+              >
+                {t('sidepanel.dropToBind')}
+              </div>
+            )}
+            {/* 当前会话的文件列表：没有文件时整块隐藏 */}
+            {boundFiles.length > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  maxHeight: 96,
+                  overflowY: 'auto',
+                  marginBottom: 6,
+                }}
+              >
+                {boundFiles.map((file) => (
+                  <div
+                    key={file.name}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: space.sm,
+                      padding: '2px 6px',
+                      borderRadius: radius.sm,
+                      background: color.surfaceMuted,
+                      fontSize: fontSize.xs,
+                    }}
+                  >
+                    <span
+                      title={file.name}
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        color: color.textSecondary,
+                      }}
+                    >
+                      {file.name}
+                    </span>
+                    <span style={{ flex: 'none', color: color.textFaint }}>
+                      {formatFileSize(file.size)}
+                    </span>
+                    <button
+                      type="button"
+                      title={t('sidepanel.unbind')}
+                      aria-label={t('sidepanel.unbind')}
+                      onClick={() => void handleUnbindFile(file.name)}
+                      style={{
+                        flex: 'none',
+                        width: 16,
+                        height: 16,
+                        padding: 0,
+                        border: 'none',
+                        borderRadius: 3,
+                        background: 'transparent',
+                        color: color.textMuted,
+                        cursor: 'pointer',
+                        lineHeight: 1,
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             {/* 输入区整体容器：上方真实输入框，下方单独一行放模型选择、权限选择和发送按钮 */}
             <div
               style={{
@@ -1373,21 +1535,40 @@ export default function App() {
                   <Button
                     size="sm"
                     variant="danger"
-                    style={{ marginLeft: 'auto' }}
+                    style={{ marginLeft: 'auto', flex: 'none' }}
                     onClick={handleStop}
                   >
                     {t('sidepanel.stop')}
                   </Button>
                 ) : (
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    disabled={!canSend}
-                    style={{ marginLeft: 'auto' }}
-                    onClick={() => void handleSend()}
-                  >
-                    {t('sidepanel.send')}
-                  </Button>
+                  <>
+                    <Button
+                      size="sm"
+                      style={{
+                        marginLeft: 'auto',
+                        flex: 'none',
+                        border: 'none',
+                        borderRadius: radius.sm,
+                        background: color.surfaceSubtle,
+                        color: activeSessionId ? color.textSecondary : color.textFaint,
+                        padding: '4px 8px',
+                        fontSize: fontSize.sm,
+                        lineHeight: 1.5,
+                      }}
+                      disabled={!activeSessionId}
+                      onClick={() => void handleAddFile()}
+                    >
+                      {t('sidepanel.addFile')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={!canSend}
+                      onClick={() => void handleSend()}
+                    >
+                      {t('sidepanel.send')}
+                    </Button>
+                  </>
                 )}
               </div>
             </div>
@@ -1477,6 +1658,47 @@ function PullTab({
 function describeError(error: unknown): string {
   if (error instanceof LLMError) return error.message
   return error instanceof Error ? error.message : String(error)
+}
+
+/** 标题栏设置按钮的齿轮图标，避免引入图标依赖 */
+function GearIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.35a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.65 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.64h.01A1.7 1.7 0 0 0 10.04 3.08V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.07 4.65a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 9v.01A1.7 1.7 0 0 0 20.92 10.04H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15z" />
+    </svg>
+  )
+}
+
+/** 拖拽内容是否包含文件 */
+function hasFilePayload(event: DragEvent<HTMLElement>): boolean {
+  return Array.from(event.dataTransfer.types).includes('Files')
+}
+
+/** 从拖拽项中取出文件句柄；浏览器不支持或是目录时返回 null */
+function readDroppedFileHandle(item: DataTransferItem): Promise<FileSystemFileHandle | null> {
+  const withHandle = item as DataTransferItem & {
+    getAsFileSystemHandle?: () => Promise<{ kind: string } | null>
+  }
+  if (typeof withHandle.getAsFileSystemHandle !== 'function') {
+    return Promise.resolve(null)
+  }
+  return withHandle
+    .getAsFileSystemHandle()
+    .then((handle) =>
+      handle?.kind === 'file' ? (handle as unknown as FileSystemFileHandle) : null,
+    )
+    .catch(() => null)
 }
 
 function formatFileSize(bytes: number): string {

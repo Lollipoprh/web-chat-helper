@@ -101,6 +101,26 @@ describe('createChatCompletion', () => {
     expect((error as LLMError).code).toBe('protocol')
   })
 
+  it('parses usage from the response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse({
+          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 },
+        }),
+      ),
+    )
+
+    const result = await createChatCompletion(baseRequest)
+
+    expect(result.usage).toEqual({
+      promptTokens: 12,
+      completionTokens: 3,
+      totalTokens: 15,
+    })
+  })
+
   it('fails before sending when the signal is already aborted', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
@@ -145,6 +165,30 @@ describe('streamChatCompletion', () => {
         function: { name: 'click_element', arguments: '{"ref":"ref-1"}' },
       },
     ])
+  })
+
+  it('reads usage from the trailing empty-choices chunk', async () => {
+    const fetchMock = vi.fn(
+      async (_url: RequestInfo | URL, _init?: RequestInit) =>
+        sseResponse([
+          'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+          'data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}\n\n',
+          'data: [DONE]\n\n',
+        ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await streamChatCompletion(baseRequest, () => {})
+
+    expect(result.usage).toEqual({
+      promptTokens: 7,
+      completionTokens: 2,
+      totalTokens: 9,
+    })
+
+    const init = fetchMock.mock.calls[0][1]
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+    expect(body.stream_options).toEqual({ include_usage: true })
   })
 
   it('reports incompatible streams instead of returning empty content', async () => {

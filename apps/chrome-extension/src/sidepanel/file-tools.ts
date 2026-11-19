@@ -75,17 +75,18 @@ function isTextFile(name: string): boolean {
   return ext === '' || TEXT_EXTENSIONS.has(ext)
 }
 
-/** 按文件名取已绑定文件，统一处理未绑定 / 句柄失效 / 非文本三类错误 */
+/** 按会话 + 文件名取已绑定文件，统一处理未绑定 / 句柄失效 / 非文本三类错误 */
 async function resolveBoundFile(
+  sessionId: string,
   fileName: string,
   action: string,
 ): Promise<{ file: File; handle: FileSystemFileHandle } | ToolResult> {
-  const handle = await getFileHandle(fileName)
+  const handle = await getFileHandle(sessionId, fileName)
   if (!handle) {
     return {
       ok: false,
       code: 'invalid_args',
-      message: `未找到已绑定的文件「${fileName}」，请先调用 list_bound_files 确认可用文件名`,
+      message: `当前会话未绑定文件「${fileName}」，请先调用 list_bound_files 确认可用文件名，或提醒用户重新添加`,
     }
   }
 
@@ -96,7 +97,7 @@ async function resolveBoundFile(
     return {
       ok: false,
       code: 'execution_failed',
-      message: `文件「${fileName}」无法${action}，可能已被移动或删除，请用户重新绑定`,
+      message: `文件「${fileName}」无法${action}，可能已被移动或删除。请提醒用户解绑后重新添加该文件`,
     }
   }
 
@@ -166,29 +167,29 @@ function startDownload(url: string, filename: string): Promise<number> {
   })
 }
 
-/** 创建文件读写工具集合，在 Side Panel 的 agent loop 中注册 */
-export function createFileTools(): AgentTool[] {
+/** 创建当前会话的文件读写工具集合，在 Side Panel 的 agent loop 中注册 */
+export function createFileTools(sessionId: string): AgentTool[] {
   return [
     {
       name: 'list_bound_files',
       description:
-        'List the local files the user has bound to this extension, each with file name, size and last modified time. Call this before read_file or write_file to learn which files are available. Returns an empty list if no file is bound.',
+        'List the local files the user has bound to the current chat session, each with file name, size and last modified time. Call this before read_file or write_file to learn which files are available. Returns an empty list if no file is bound.',
       parameters: EMPTY_PARAMS,
       readOnly: true,
       async execute(): Promise<ToolResult> {
-        const files = await listBoundFiles()
+        const files = await listBoundFiles(sessionId)
         if (files.length === 0) {
           return {
             ok: true,
             data: [],
             message:
-              '当前没有绑定任何本地文件。如需新建文件，可直接调用 download_file 保存到系统下载目录。',
+              '当前会话没有绑定任何本地文件。如需新建文件，可直接调用 download_file 保存到系统下载目录。',
           }
         }
         return {
           ok: true,
           data: files,
-          message: `已绑定 ${files.length} 个文件：${files.map((f) => f.name).join('、')}`,
+          message: `当前会话已绑定 ${files.length} 个文件：${files.map((f) => f.name).join('、')}`,
         }
       },
     },
@@ -209,7 +210,7 @@ export function createFileTools(): AgentTool[] {
       },
       readOnly: true,
       async execute(args): Promise<ToolResult> {
-        const resolved = await resolveBoundFile(String(args.file_name), '读取')
+        const resolved = await resolveBoundFile(sessionId, String(args.file_name), '读取')
         if (!isResolved(resolved)) return resolved
 
         const { file } = resolved
@@ -250,7 +251,7 @@ export function createFileTools(): AgentTool[] {
         const content = String(args.content)
         const mode = args.mode === 'append' ? 'append' : 'overwrite'
 
-        const resolved = await resolveBoundFile(String(args.file_name), '写入')
+        const resolved = await resolveBoundFile(sessionId, String(args.file_name), '写入')
         if (!isResolved(resolved)) return resolved
 
         const { file, handle } = resolved
@@ -272,7 +273,7 @@ export function createFileTools(): AgentTool[] {
         // 写入成功后回写元数据，让侧边栏列表显示最新的大小与修改时间
         try {
           const updated = await handle.getFile()
-          await updateFileMeta(updated.name, updated.size, updated.lastModified)
+          await updateFileMeta(sessionId, updated.name, updated.size, updated.lastModified)
         } catch (error) {
           // 元数据回写失败不影响写入结果本身
           console.warn('[file] 回写文件元数据失败', error)

@@ -59,6 +59,15 @@ export interface ChatResult {
   /** 完整消息，可直接追加到对话历史 */
   message: ChatMessage
   toolCalls: ToolCall[]
+  /** 本次请求的 token 用量；服务未返回时为 undefined */
+  usage?: TokenUsage
+}
+
+/** OpenAI 兼容接口的 usage 字段，统一成 camelCase */
+export interface TokenUsage {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
 }
 
 const DEFAULT_CHAT_TIMEOUT_MS = 120_000
@@ -90,6 +99,7 @@ export async function createChatCompletion(request: ChatRequest): Promise<ChatRe
     const choice = getFirstChoice(payload)
     const content = getChoiceMessageContent(choice) ?? ''
     const toolCalls = normalizeToolCalls(getChoiceMessageToolCalls(choice))
+    const usage = parseUsage(payload)
 
     if (!content && toolCalls.length === 0) {
       throw new LLMError('protocol', '返回结构缺少 message.content')
@@ -104,6 +114,7 @@ export async function createChatCompletion(request: ChatRequest): Promise<ChatRe
         ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
       },
       toolCalls,
+      ...(usage ? { usage } : {}),
     }
   } catch (error) {
     throw normalizeError(error, context)
@@ -143,6 +154,7 @@ export async function streamChatCompletion(
     let content = ''
     let finishReason: string | null = null
     let malformedEvents = 0
+    let usage: TokenUsage | null = null
     const toolCallBuffers = new Map<number, ToolCallBuffer>()
 
     await consumeSseStream(response.body, (data) => {
@@ -157,6 +169,9 @@ export async function streamChatCompletion(
         malformedEvents += 1
         return
       }
+
+      // include_usage 时，用量会在最后一个 choices 为空的分片里返回
+      usage = parseUsage(chunk) ?? usage
 
       const choice = getFirstChoice(chunk)
       if (!choice) return
@@ -189,6 +204,7 @@ export async function streamChatCompletion(
         ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
       },
       toolCalls,
+      ...(usage ? { usage } : {}),
     }
   } catch (error) {
     throw normalizeError(error, context)
@@ -202,6 +218,11 @@ function buildRequestBody(request: ChatRequest, stream: boolean): Record<string,
     model: request.model,
     messages: request.messages,
     stream,
+  }
+
+  // 流式请求显式索要 usage；不支持该字段的服务由 parseUsage 兜底为 undefined
+  if (stream) {
+    body.stream_options = { include_usage: true }
   }
 
   if (request.tools && request.tools.length > 0) {
@@ -305,6 +326,31 @@ function getChoiceDeltaToolCalls(choice: NormalizedChoice): unknown {
 function getFinishReason(choice: NormalizedChoice | null): string | null {
   const reason = choice?.finish_reason
   return typeof reason === 'string' && reason ? reason : null
+}
+
+function toTokenCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : null
+}
+
+/** 解析 OpenAI 兼容的 usage 字段；缺失或非法时返回 null，不影响主流程 */
+function parseUsage(payload: unknown): TokenUsage | null {
+  if (!payload || typeof payload !== 'object') return null
+  const usage = (payload as Record<string, unknown>).usage
+  if (!usage || typeof usage !== 'object') return null
+
+  const record = usage as Record<string, unknown>
+  const promptTokens = toTokenCount(record.prompt_tokens)
+  const completionTokens = toTokenCount(record.completion_tokens)
+  if (promptTokens === null && completionTokens === null) return null
+
+  return {
+    promptTokens: promptTokens ?? 0,
+    completionTokens: completionTokens ?? 0,
+    totalTokens:
+      toTokenCount(record.total_tokens) ?? (promptTokens ?? 0) + (completionTokens ?? 0),
+  }
 }
 
 /** 解析非流式返回中的完整 tool_calls */

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import {
+  DEFAULT_CONTEXT_WINDOW,
   maskApiKey,
   parseEndpoint,
   testConnection,
@@ -22,12 +23,20 @@ interface TestFeedback {
   message: string
 }
 
+function isPositiveInteger(value: string): boolean {
+  const parsed = Number(value.trim())
+  return Number.isInteger(parsed) && parsed > 0
+}
+
 export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFormProps) {
   const { t } = useI18n()
   const [name, setName] = useState(initial?.name ?? '')
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? '')
   const [apiKey, setApiKey] = useState(initial?.apiKey ?? '')
   const [model, setModel] = useState(initial?.model ?? '')
+  const [contextWindow, setContextWindow] = useState(
+    String(initial?.contextWindow ?? DEFAULT_CONTEXT_WINDOW),
+  )
   const [supportsStreaming, setSupportsStreaming] = useState(initial?.supportsStreaming ?? true)
   const [supportsToolCalls, setSupportsToolCalls] = useState(initial?.supportsToolCalls ?? true)
   const [showKey, setShowKey] = useState(false)
@@ -44,6 +53,7 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
     if (!baseUrl.trim()) return t('providerForm.errBaseUrl')
     if (!apiKey.trim()) return t('providerForm.errApiKey')
     if (!model.trim()) return t('providerForm.errModel')
+    if (!isPositiveInteger(contextWindow)) return t('providerForm.errContextWindow')
     return null
   }
 
@@ -108,6 +118,7 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
         model: model.trim(),
+        contextWindow: Math.floor(Number(contextWindow.trim())),
         supportsStreaming,
         supportsToolCalls,
       })
@@ -196,6 +207,19 @@ export default function ProviderForm({ initial, onSubmit, onCancel }: ProviderFo
             placeholder={t('providerForm.modelPlaceholder')}
             spellCheck={false}
             onChange={(event) => setModel(event.target.value)}
+          />
+        </Field>
+
+        <Field
+          label={t('providerForm.contextWindowLabel')}
+          hint={t('providerForm.contextWindowHint')}
+        >
+          <Input
+            type="number"
+            min={1}
+            step={1}
+            value={contextWindow}
+            onChange={(event) => setContextWindow(event.target.value)}
           />
         </Field>
 

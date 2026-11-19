@@ -174,6 +174,30 @@ describe('runAgentLoop', () => {
     expect(execute).toHaveBeenCalledTimes(1)
   })
 
+  it('accumulates usage across model requests', async () => {
+    const registry = new ToolRegistry().register(
+      freeFormTool(async () => ({ ok: true, message: 'clicked' })),
+    )
+
+    mockedCreate
+      .mockResolvedValueOnce({
+        ...resultWith([toolCall('click_element', { ref: 'ref-1' })]),
+        usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12 },
+      })
+      .mockResolvedValueOnce({
+        ...resultWith([]),
+        usage: { promptTokens: 20, completionTokens: 4, totalTokens: 24 },
+      })
+
+    const result = await runAgentLoop({ chat, tools: registry, messages: [] })
+
+    expect(result.usage).toEqual({
+      promptTokens: 30,
+      completionTokens: 6,
+      totalTokens: 36,
+    })
+  })
+
   it('times out a tool that never settles', async () => {
     const registry = new ToolRegistry().register(
       freeFormTool(() => new Promise<ToolResult>(() => {})),

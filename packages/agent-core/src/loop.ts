@@ -9,6 +9,7 @@ import {
   type ChatMessage,
   type ChatRequest,
   type ChatResult,
+  type TokenUsage,
   type ToolCall,
 } from 'llm-client'
 import { ToolRegistry } from './registry'
@@ -78,6 +79,9 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
 
   let rounds = 0
   let finalText = ''
+  // 一轮任务可能包含多次模型请求，用量按轮累加；服务不返回 usage 时保持 undefined
+  const usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+  let hasUsage = false
 
   const finish = (stopReason: StopReason, extra?: { error?: string }): AgentRunResult => ({
     stopReason,
@@ -85,6 +89,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
     finalText,
     logs,
     messages,
+    ...(hasUsage ? { usage: { ...usage } } : {}),
     ...extra,
   })
 
@@ -117,6 +122,13 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
 
     messages.push(result.message)
     if (result.content) finalText = result.content
+
+    if (result.usage) {
+      hasUsage = true
+      usage.promptTokens += result.usage.promptTokens
+      usage.completionTokens += result.usage.completionTokens
+      usage.totalTokens += result.usage.totalTokens
+    }
 
     // 没有工具调用：模型已给出最终答复
     if (result.toolCalls.length === 0) {

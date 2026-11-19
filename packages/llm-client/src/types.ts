@@ -16,9 +16,14 @@ export interface ProviderConfig {
   supportsStreaming: boolean
   /** 该供应商是否支持 Tool Calls */
   supportsToolCalls: boolean
+  /** 模型上下文窗口（tokens），用于侧边栏用量进度；缺省按 DEFAULT_CONTEXT_WINDOW 处理 */
+  contextWindow?: number
   createdAt: number
   updatedAt: number
 }
+
+/** 上下文窗口默认值：用户未填写时的兜底 */
+export const DEFAULT_CONTEXT_WINDOW = 128_000
 
 /** 创建新供应商时的初始值，id 与时间戳由调用方补齐 */
 export type ProviderDraft = Omit<ProviderConfig, 'id' | 'createdAt' | 'updatedAt'>

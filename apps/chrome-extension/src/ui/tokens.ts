@@ -37,6 +37,10 @@ export const color = {
   infoText: '#0c4a6e',
   infoSoft: '#f0f9ff',
   infoBorder: '#bae6fd',
+  usageTrack: '#dbeafe',
+  usageInput: '#86efac',
+  usageOutput: '#facc15',
+  usageFull: '#f4511e',
 } as const
 
 export const radius = {
