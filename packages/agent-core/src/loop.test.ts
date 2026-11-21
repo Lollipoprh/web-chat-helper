@@ -75,6 +75,34 @@ describe('runAgentLoop', () => {
     expect(result.logs.map((log) => log.code)).toEqual([undefined, 'duplicate_call'])
   })
 
+  it('allows retrying a side-effecting call that failed earlier in the task', async () => {
+    let closeTabCalls = 0
+    const closeTab = vi.fn(async (): Promise<ToolResult> => {
+      closeTabCalls += 1
+      return closeTabCalls === 1
+        ? { ok: false, code: 'invalid_args', message: '不能关闭任务绑定页' }
+        : { ok: true, message: 'closed' }
+    })
+    const switchTab = vi.fn(async (): Promise<ToolResult> => ({ ok: true, message: 'switched' }))
+    const registry = new ToolRegistry()
+      .register(freeFormTool(closeTab, { name: 'close_tab' }))
+      .register(freeFormTool(switchTab, { name: 'switch_tab', readOnly: true }))
+
+    mockedCreate
+      .mockResolvedValueOnce(resultWith([toolCall('close_tab', { tab_id: 123 })]))
+      .mockResolvedValueOnce(
+        resultWith([toolCall('switch_tab', { tab_id: 456 }, 'call_2')]),
+      )
+      .mockResolvedValueOnce(resultWith([toolCall('close_tab', { tab_id: 123 }, 'call_3')]))
+      .mockResolvedValueOnce(resultWith([]))
+
+    const result = await runAgentLoop({ chat, tools: registry, messages: [] })
+
+    expect(result.stopReason).toBe('completed')
+    expect(closeTab).toHaveBeenCalledTimes(2)
+    expect(result.logs.map((log) => log.code)).toEqual(['invalid_args', undefined, undefined])
+  })
+
   it('allows repeated calls to read-only tools', async () => {
     const execute = vi.fn(async (): Promise<ToolResult> => ({ ok: true, message: 'read' }))
     const registry = new ToolRegistry().register(freeFormTool(execute, { readOnly: true }))

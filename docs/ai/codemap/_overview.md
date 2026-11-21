@@ -5,7 +5,7 @@
 | Module | Files | Lines | Workspace dependencies |
 | --- | ---: | ---: | --- |
 | apps/chrome-extension | 43 | 9834 | `agent-core`, `browser-tools`, `llm-client` |
-| packages/agent-core | 6 | 810 | `llm-client` |
+| packages/agent-core | 6 | 811 | `llm-client` |
 | packages/browser-tools | 3 | 789 | `agent-core` |
 | packages/llm-client | 7 | 871 | - |
 
@@ -25,6 +25,6 @@
 | packages/browser-tools/src/tools.ts | 541 |
 | apps/chrome-extension/src/content/input-injection.ts | 508 |
 | apps/chrome-extension/src/shared/i18n.ts | 484 |
-| packages/agent-core/src/loop.ts | 470 |
+| packages/agent-core/src/loop.ts | 471 |
 | packages/llm-client/src/chat.ts | 441 |
 | apps/chrome-extension/src/shared/step-log-storage.ts | 435 |

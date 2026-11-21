@@ -255,12 +255,14 @@ async function executeToolCall(params: ExecuteToolParams): Promise<ExecutedToolC
 
   // 4. 重复调用拦截（同一任务内相同工具 + 相同参数）
   //    只读工具允许重复执行：页面变化后重读快照是正常操作，由轮次上限兜底
+  //    签名只在调用真正成功后登记：失败或被拒绝的调用没有产生副作用，
+  //    模型修正上下文后应能重试同一调用（例如先 switch_tab 再 close_tab）
+  let signature: string | undefined
   if (!tool.readOnly) {
-    const signature = `${tool.name}:${stableStringify(validation.value)}`
+    signature = `${tool.name}:${stableStringify(validation.value)}`
     if (params.executedSignatures.has(signature)) {
       return fail('duplicate_call', '与本次任务中已执行过的调用完全相同，已跳过以避免重复副作用')
     }
-    params.executedSignatures.add(signature)
   }
 
   // 5. 副作用动作确认：没有 onConfirmationRequest 时默认允许，保持向后兼容
@@ -300,10 +302,7 @@ async function executeToolCall(params: ExecuteToolParams): Promise<ExecutedToolC
 
     if (!allowed) {
       // 拒绝后也把签名加入已执行列表，防止模型反复尝试相同副作用动作
-      if (!tool.readOnly) {
-        const signature = `${tool.name}:${stableStringify(validation.value)}`
-        params.executedSignatures.add(signature)
-      }
+      if (signature) params.executedSignatures.add(signature)
       return fail(
         'needs_confirmation',
         `用户拒绝执行「${toolName}」。可以调整目标或选择其他动作，但再次请求完全相同的调用会被跳过。`,
@@ -345,6 +344,8 @@ async function executeToolCall(params: ExecuteToolParams): Promise<ExecutedToolC
 
   const durationMs = Date.now() - startedAt
   const ok = result.ok
+  // 成功后才登记签名；失败的副作用调用允许在模型调整前置条件后重试
+  if (ok && signature) params.executedSignatures.add(signature)
   onToolEvent?.({
     id: call.id,
     round,
