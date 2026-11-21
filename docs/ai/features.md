@@ -6,6 +6,7 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 
 - Request entry points: `packages/llm-client/src/chat.ts` (`streamChatCompletion`, `createChatCompletion`)
 - Stream parsing: `packages/llm-client/src/sse.ts` (`consumeSseStream`)
+- Token usage parsing: `packages/llm-client/src/chat.ts` (`TokenUsage`, `parseUsage`) — streaming requests send `stream_options.include_usage`; missing usage leaves `ChatResult.usage` undefined
 - Endpoint normalization: `packages/llm-client/src/endpoint.ts` (`parseEndpoint`)
 - Error mapping: `packages/llm-client/src/errors.ts` (`LLMError`, `httpStatusToLLMError`)
 
@@ -44,6 +45,8 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 ## Side panel UI and chat interaction
 
 - Main UI: `apps/chrome-extension/src/sidepanel/App.tsx`
+- Header: title only plus a gear icon that opens Settings; the model name lives in the bottom `ModelPicker`
+- Usage meter: `apps/chrome-extension/src/sidepanel/components/UsageMeter.tsx` — cumulative input/output tokens and context window with a progress bar
 - System prompt and task policies: `apps/chrome-extension/src/sidepanel/App.tsx` (`SYSTEM_PROMPT`) — page translation defaults to in-place DOM edits unless the user asks for a chat reply
 - Task history: `apps/chrome-extension/src/sidepanel/TaskHistory.tsx`
 - Message bubble and tool-call card: `apps/chrome-extension/src/sidepanel/components/`
@@ -67,14 +70,22 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 ## Sessions and task history storage
 
 - Sessions: `apps/chrome-extension/src/shared/session-storage.ts` (`SessionRecord`, `listSessions`)
+- Session usage totals: `apps/chrome-extension/src/shared/session-storage.ts` (`addSessionUsage`, `inputTokens`, `outputTokens`) — cumulative per session, reset when the session messages are cleared
 - Step logs: `apps/chrome-extension/src/shared/step-log-storage.ts` (`recordStep`, `listSessionTasks`, `pruneLogs`)
 - Chat records: `apps/chrome-extension/src/shared/chat-storage.ts`
 - IndexedDB setup: `apps/chrome-extension/src/shared/local-db.ts`
+
+## Session-scoped local files
+
+- File handle storage: `apps/chrome-extension/src/shared/file-handle-store.ts` (`bindFile`, `bindFileHandle`, `listBoundFiles`, `unbindFile`, `deleteSessionFiles`) — key is `${session_id}::${name}` with a `by_sessionId` index; the v5 DB upgrade recreates the store and drops legacy global bindings (no migration)
+- File tools: `apps/chrome-extension/src/sidepanel/file-tools.ts` (`createFileTools(sessionId)`) — `list_bound_files` and every read/write are limited to files bound to the current session
+- Side Panel UI: file list sits above the composer, is hidden when empty, and the "Add file" button opens the system picker directly (no management panel); dropping files onto the chat panel or composer binds them to the current session through `DataTransferItem.getAsFileSystemHandle()`
 
 ## Provider configuration: model, key, and URL
 
 - Storage: `apps/chrome-extension/src/shared/storage.ts` (`ProviderConfig`, `loadProviders`, `saveProvider`)
 - UI: `apps/chrome-extension/src/options/ProviderForm.tsx`, `apps/chrome-extension/src/options/App.tsx`
+- Context window: `packages/llm-client/src/types.ts` (`ProviderConfig.contextWindow`, `DEFAULT_CONTEXT_WINDOW`) — edited in the provider form, used by the Side Panel usage meter
 - Side Panel model switcher (grouped by provider, opens upward): `apps/chrome-extension/src/sidepanel/components/ModelPicker.tsx`
 
 ## Permissions, message routing, and injection

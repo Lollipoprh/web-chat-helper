@@ -3,7 +3,7 @@
 // 注意：这不是密钥保险库，同机其他进程有手段读取浏览器存储；UI 中已向用户说明
 
 import { DEFAULT_AGENT_LIMITS, type AgentLimits } from 'agent-core'
-import type { ProviderConfig } from 'llm-client'
+import { DEFAULT_CONTEXT_WINDOW, type ProviderConfig } from 'llm-client'
 import { decryptInList, encryptInList } from './encryption'
 
 export const PROVIDERS_STORAGE_KEY = 'providers'
@@ -103,9 +103,16 @@ function normalizeProvider(provider: ProviderConfig): ProviderConfig {
     ...provider,
     supportsStreaming: provider.supportsStreaming !== false,
     supportsToolCalls: provider.supportsToolCalls !== false,
+    contextWindow: normalizeContextWindow(provider.contextWindow),
     createdAt: typeof provider.createdAt === 'number' ? provider.createdAt : Date.now(),
     updatedAt: typeof provider.updatedAt === 'number' ? provider.updatedAt : Date.now(),
   }
+}
+
+function normalizeContextWindow(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : DEFAULT_CONTEXT_WINDOW
 }
 
 /** 读取副作用动作的确认豁免开关；默认 false（仍需用户确认） */

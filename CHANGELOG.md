@@ -8,7 +8,45 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
 本文件记录 Web Chat Helper 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.1.5] - 2026-11-21
+
+### Added / 新增
+
+- **Session usage meter** — a compact strip below the session toolbar shows cumulative context
+  usage: the track is light blue, the input segment light green, the output segment yellow, and
+  the whole bar turns orange-red once the configured window is full. Token numbers come from
+  OpenAI-compatible `usage` (streaming asks for `stream_options.include_usage`), accumulate in
+  `SessionRecord`, and appear in a hover tooltip instead of inline text.
+  **会话用量条** —— 历史会话栏下方新增紧凑用量条：轨道浅蓝、输入段浅绿、输出段黄色，
+  窗口占满后整条变为橙红。用量来自 OpenAI 兼容的 `usage` 字段
+  （流式请求显式索要 `stream_options.include_usage`），按会话累加持久化，
+  token 数值仅在鼠标悬浮时通过通用 Tooltip 展示。
+- **Reusable Tooltip component** — `apps/chrome-extension/src/ui/Tooltip.tsx` renders a glassy
+  floating panel on hover/focus and is reused by the usage meter.
+  **通用悬浮框组件** —— 新增 `Tooltip`，悬浮或聚焦时展示毛玻璃浮层，供用量条复用。
+- **Per-session local files** — the "Add file" button now sits left of Send and opens the system
+  file picker directly. Bound files are stored per session (`${sessionId}::${name}`), listed above
+  the composer only when present, and file tools are limited to the current session.
+  **文件按会话隔离** —— 「添加文件」按钮移到发送键左侧并直接弹出系统文件选择器；绑定文件按会话存储
+  （`${sessionId}::${name}`），仅在输入框上方展示当前会话的文件，文件工具也只能读写本会话绑定的文件。
+- **Drag-and-drop file binding** — dropping files onto the chat panel or composer binds them to the
+  current session via `DataTransferItem.getAsFileSystemHandle()`, with a drop hint and highlight.
+  **拖拽绑定文件** —— 将文件拖到会话框或输入框即可绑定到当前会话，拖拽时有高亮和提示。
+- **Provider context window setting** — providers gain an editable `contextWindow` field
+  (default 128000) used by the usage meter.
+  **供应商上下文窗口设置** —— 供应商表单新增可编辑的 `contextWindow` 字段（默认 128000），
+  供用量进度使用。
+
+### Changed / 变更
+
+- **Compact Side Panel header** — the provider/model subtitle is removed, the settings button is
+  now a gear icon, and header padding is reduced.
+  **侧边栏标题栏收紧** —— 去掉供应商/模型副标题，设置按钮改为齿轮图标，并减小标题栏高度。
+- **File bindings are now per session** — the v5 IndexedDB upgrade recreates the file-handle store
+  and intentionally drops legacy global bindings; stale handles now tell the user to unbind and
+  re-add the file.
+  **文件绑定改为按会话维护** —— IndexedDB 升级到 v5 时重建文件句柄存储，旧全局绑定不做迁移；
+  句柄失效时提示用户解绑后重新添加。
 
 ## [0.1.4] - 2026-11-18
 
@@ -291,7 +329,8 @@ model continues decision or gives the final answer.
   may still change. Check future release notes before upgrading.
   首个版本，供应商配置结构、跨上下文消息协议与工具参数仍可能调整，升级前请留意后续变更说明。
 
-[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.5
 [0.1.4]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.4
 [0.1.3]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.3
 [0.1.2]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.2

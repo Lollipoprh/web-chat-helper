@@ -28,6 +28,10 @@ export interface SessionRecord {
   createdAt: number
   updatedAt: number
   messageCount: number
+  /** 会话内所有请求累计的输入 token */
+  inputTokens?: number
+  /** 会话内所有请求累计的输出 token */
+  outputTokens?: number
 }
 
 export interface SessionMessageRecord {
@@ -50,6 +54,8 @@ export async function createSession(): Promise<SessionRecord> {
     createdAt: now,
     updatedAt: now,
     messageCount: 0,
+    inputTokens: 0,
+    outputTokens: 0,
   }
   const tx = db.transaction(SESSION_STORE, 'readwrite')
   tx.objectStore(SESSION_STORE).put(session)
@@ -131,6 +137,8 @@ export async function clearSessionMessages(sessionId: string): Promise<void> {
       ...session,
       title: DEFAULT_SESSION_TITLE,
       messageCount: 0,
+      inputTokens: 0,
+      outputTokens: 0,
       updatedAt: Date.now(),
     })
   }
@@ -145,6 +153,33 @@ export async function deleteSession(sessionId: string): Promise<void> {
   const tx = db.transaction([SESSION_STORE, MESSAGE_STORE], 'readwrite')
   tx.objectStore(SESSION_STORE).delete(sessionId)
   await deleteByIndex(tx.objectStore(MESSAGE_STORE), MESSAGE_SESSION_INDEX, sessionId)
+  await txDone(tx)
+}
+
+/**
+ * 累加会话的 token 用量。
+ * 不更新 updatedAt：用量变化不应改变会话在列表中的排序。
+ */
+export async function addSessionUsage(
+  sessionId: string,
+  inputTokens: number,
+  outputTokens: number,
+): Promise<void> {
+  if (!inputTokens && !outputTokens) return
+
+  const db = await openLocalDb()
+  const tx = db.transaction(SESSION_STORE, 'readwrite')
+  const store = tx.objectStore(SESSION_STORE)
+  const session = await requestResult<SessionRecord | undefined>(
+    store.get(sessionId) as IDBRequest<SessionRecord | undefined>,
+  )
+  if (session) {
+    store.put({
+      ...session,
+      inputTokens: (session.inputTokens ?? 0) + inputTokens,
+      outputTokens: (session.outputTokens ?? 0) + outputTokens,
+    })
+  }
   await txDone(tx)
 }
 

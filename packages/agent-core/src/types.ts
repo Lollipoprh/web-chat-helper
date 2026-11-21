@@ -1,6 +1,6 @@
 // Agent 核心类型：工具接口、统一结果、日志与停止原因
 
-import type { ChatMessage } from 'llm-client'
+import type { ChatMessage, TokenUsage } from 'llm-client'
 import type { JsonSchema } from './validation'
 
 export type ToolErrorCode =
@@ -107,4 +107,6 @@ export interface AgentRunResult {
   error?: string
   logs: AgentToolLog[]
   messages: ChatMessage[]
+  /** 本次任务内所有模型请求累计的 token 用量；服务未返回时为 undefined */
+  usage?: TokenUsage
 }
