@@ -40,6 +40,8 @@ export interface SessionRecord {
   compactedAt?: number
   /** 摘要覆盖到的最后一条消息；历史从它之后开始取，避免摘要与历史重复计费 */
   digestThroughMessageId?: string
+  /** 当前上下文的估算 token 占用；/compact 后立即下降，用于进度条 */
+  contextTokens?: number
 }
 
 export interface SessionMessageRecord {
@@ -153,6 +155,7 @@ export async function clearSessionMessages(sessionId: string): Promise<void> {
       digestTokens: undefined,
       compactedAt: undefined,
       digestThroughMessageId: undefined,
+      contextTokens: 0,
       updatedAt: Date.now(),
     })
   }
@@ -233,6 +236,20 @@ export async function saveSessionDigest(
       digestThroughMessageId: input.digestThroughMessageId,
       compactedAt: Date.now(),
     })
+  }
+  await txDone(tx)
+}
+
+/** 更新当前上下文占用估算，供进度条在压缩后立即下降 */
+export async function saveSessionContextTokens(sessionId: string, tokens: number): Promise<void> {
+  const db = await openLocalDb()
+  const tx = db.transaction(SESSION_STORE, 'readwrite')
+  const store = tx.objectStore(SESSION_STORE)
+  const session = await requestResult<SessionRecord | undefined>(
+    store.get(sessionId) as IDBRequest<SessionRecord | undefined>,
+  )
+  if (session) {
+    store.put({ ...session, contextTokens: Math.max(0, Math.floor(tokens)) })
   }
   await txDone(tx)
 }

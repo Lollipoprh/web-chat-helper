@@ -9,19 +9,37 @@ export interface UsageMeterProps {
   inputTokens: number
   outputTokens: number
   contextWindow: number
+  /** 当前上下文估算；提供时进度条按它绘制，而不是会话累计用量 */
+  contextTokens?: number
 }
 
-export function UsageMeter({ inputTokens, outputTokens, contextWindow }: UsageMeterProps) {
+export function UsageMeter({
+  inputTokens,
+  outputTokens,
+  contextWindow,
+  contextTokens,
+}: UsageMeterProps) {
   const { t } = useI18n()
-  const used = inputTokens + outputTokens
+  const contextMode = contextTokens !== undefined
+  const used = contextMode ? Math.max(0, contextTokens) : inputTokens + outputTokens
   const full = contextWindow > 0 && used >= contextWindow
   const usedRatio = contextWindow > 0 ? Math.min(1, used / contextWindow) : 0
-  const inputRatio = contextWindow > 0 ? Math.min(1, inputTokens / contextWindow) : 0
-  const outputRatio = contextWindow > 0 ? Math.min(1 - inputRatio, outputTokens / contextWindow) : 0
+  const inputRatio = contextMode
+    ? usedRatio
+    : contextWindow > 0
+      ? Math.min(1, inputTokens / contextWindow)
+      : 0
+  const outputRatio = contextMode
+    ? 0
+    : contextWindow > 0
+      ? Math.min(1 - inputRatio, outputTokens / contextWindow)
+      : 0
 
-  const tooltip = `${t('sidepanel.usageInput')} ${formatTokens(inputTokens)} · ${t(
-    'sidepanel.usageOutput',
-  )} ${formatTokens(outputTokens)} · ${t('sidepanel.usageWindow')} ${formatTokens(contextWindow)}`
+  const tooltip = contextMode
+    ? `${t('sidepanel.usageContext')} ${formatTokens(used)} · ${t('sidepanel.usageWindow')} ${formatTokens(contextWindow)}`
+    : `${t('sidepanel.usageInput')} ${formatTokens(inputTokens)} · ${t(
+        'sidepanel.usageOutput',
+      )} ${formatTokens(outputTokens)} · ${t('sidepanel.usageWindow')} ${formatTokens(contextWindow)}`
 
   return (
     <div style={{ padding: '4px 12px 6px' }}>

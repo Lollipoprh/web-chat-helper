@@ -35,6 +35,7 @@ import {
   getSession,
   listSessions,
   loadSessionMessages,
+  saveSessionContextTokens,
   saveSessionDigest,
   setActiveSessionId as saveActiveSessionId,
   type SessionMessageRecord,
@@ -189,6 +190,8 @@ export default function App() {
     inputTokens: 0,
     outputTokens: 0,
   })
+  // 当前上下文占用估算：进度条按它绘制，/compact 后立即下降
+  const [contextTokens, setContextTokens] = useState(0)
   // 拖拽文件到会话框/输入框时的高亮提示
   const [dragActive, setDragActive] = useState(false)
 
@@ -261,6 +264,7 @@ export default function App() {
           inputTokens: active?.inputTokens ?? 0,
           outputTokens: active?.outputTokens ?? 0,
         })
+        setContextTokens(recordedContextTokens(active))
         if (checkpoint) setInterruptedCheckpoint(checkpoint)
         setSkipConfirm(skip)
         setAgentLimits(limits)
@@ -368,6 +372,7 @@ export default function App() {
     setPendingPageOrigin(null)
     setPendingConfirmation(null)
     setTokenUsage({ inputTokens: 0, outputTokens: 0 })
+    setContextTokens(0)
     await Promise.all([clearSessionMessages(activeSessionId), clearAgentCheckpoint()])
     setInterruptedCheckpoint(null)
     void refreshSessions()
@@ -393,6 +398,7 @@ export default function App() {
           inputTokens: target?.inputTokens ?? 0,
           outputTokens: target?.outputTokens ?? 0,
         })
+        setContextTokens(recordedContextTokens(target))
         setActiveSessionId(sessionId)
         await saveActiveSessionId(sessionId)
       } catch (error) {
@@ -415,6 +421,7 @@ export default function App() {
       setMessages([])
       setBoundFiles([])
       setTokenUsage({ inputTokens: 0, outputTokens: 0 })
+      setContextTokens(0)
       setBanner(null)
       setPendingPageOrigin(null)
       setPendingConfirmation(null)
@@ -451,6 +458,7 @@ export default function App() {
         inputTokens: next.inputTokens ?? 0,
         outputTokens: next.outputTokens ?? 0,
       })
+      setContextTokens(recordedContextTokens(next))
       setView('chat')
       setBanner(null)
     } catch (error) {
@@ -659,6 +667,35 @@ export default function App() {
         digestTokens,
         digestThroughMessageId: last?.id,
       })
+
+      // 压缩后立即同步进度条：下一次请求只剩 system + 工具 schema + digest + 游标之后的历史
+      const cursorIndex = last
+        ? priorMessages.findIndex((message) => message.id === last.id)
+        : -1
+      const remaining = priorMessages
+        .slice(cursorIndex + 1)
+        .filter(
+          (message) =>
+            message.kind !== 'notice' &&
+            message.status === 'complete' &&
+            Boolean(message.content),
+        )
+      const nextContext =
+        estimateTokens(SYSTEM_PROMPT) +
+        TOOL_SCHEMA_TOKEN_ESTIMATE +
+        digestTokens +
+        estimateMessagesTokens(remaining)
+      setContextTokens(nextContext)
+      setSessions((prev) =>
+        prev.map((session) =>
+          session.sessionId === sessionId ? { ...session, contextTokens: nextContext } : session,
+        ),
+      )
+      try {
+        await saveSessionContextTokens(sessionId, nextContext)
+      } catch (error) {
+        console.warn('[session] 写入上下文占用失败', error)
+      }
       await refreshSessions()
       return t('sidepanel.slash.compactDone', { before, tokens: digestTokens })
     }
@@ -851,6 +888,8 @@ export default function App() {
     let assistantError: string | undefined
     // 本轮任务消耗的 token，任务结束后累加到会话统计
     let runUsage: TokenUsage | null = null
+    // 单次请求的输入 token，用于更新上下文进度条（累计用量不能反映当前占用）
+    let runLastPromptTokens: number | undefined
 
     const finalize = (status: MessageStatus, error?: string) => {
       assistantStatus = status
@@ -981,6 +1020,7 @@ export default function App() {
         })
 
         runUsage = result.usage ?? null
+        runLastPromptTokens = result.lastPromptTokens ?? result.usage?.promptTokens
 
         taskStatus =
           result.stopReason === 'completed'
@@ -1029,9 +1069,11 @@ export default function App() {
         if (provider.supportsStreaming) {
           const result = await streamChatCompletion(request, appendDelta)
           runUsage = result.usage ?? null
+          runLastPromptTokens = result.usage?.promptTokens
         } else {
           const result = await createChatCompletion(request)
           runUsage = result.usage ?? null
+          runLastPromptTokens = result.usage?.promptTokens
           assistantContent = result.content
           setMessages((prev) =>
             prev.map((message) =>
@@ -1080,6 +1122,24 @@ export default function App() {
           await addSessionUsage(sessionId, applied.promptTokens, applied.completionTokens)
         } catch (error) {
           console.warn('[session] 写入 token 用量失败', error)
+        }
+      }
+
+      // 进度条展示"当前上下文"：优先用服务端返回的单次 promptTokens，拿不到时按请求内容估算
+      const nextContext =
+        runLastPromptTokens ??
+        estimateMessagesTokens(requestMessages) + TOOL_SCHEMA_TOKEN_ESTIMATE
+      if (nextContext > 0) {
+        setContextTokens(nextContext)
+        setSessions((prev) =>
+          prev.map((session) =>
+            session.sessionId === sessionId ? { ...session, contextTokens: nextContext } : session,
+          ),
+        )
+        try {
+          await saveSessionContextTokens(sessionId, nextContext)
+        } catch (error) {
+          console.warn('[session] 写入上下文占用失败', error)
         }
       }
 
@@ -1374,6 +1434,7 @@ export default function App() {
       <UsageMeter
         inputTokens={tokenUsage.inputTokens}
         outputTokens={tokenUsage.outputTokens}
+        contextTokens={contextTokens}
         contextWindow={provider?.contextWindow ?? DEFAULT_CONTEXT_WINDOW}
       />
 
@@ -2011,6 +2072,29 @@ function toUiMessage(record: SessionMessageRecord): UiMessage {
     error: record.error,
     kind: record.kind,
   }
+}
+
+/** 当前上下文占用：新记录读取 contextTokens，旧记录退回累计输入 token */
+function recordedContextTokens(session?: SessionRecord | null): number {
+  if (!session) return 0
+  return session.contextTokens ?? session.inputTokens ?? 0
+}
+
+/** 工具 schema 的粗略 token 开销，仅在服务端未返回 usage 时用于进度条兜底 */
+const TOOL_SCHEMA_TOKEN_ESTIMATE = 3_500
+const CJK_PATTERN = /[\u3000-\u9fff\uff00-\uffef]/g
+
+/** CJK 按 1 字符≈1 token，其余按 4 字符≈1 token，仅用于进度条估算 */
+function estimateTokens(text: string): number {
+  const cjk = text.match(CJK_PATTERN)?.length ?? 0
+  return Math.ceil(cjk + (text.length - cjk) / 4)
+}
+
+function estimateMessagesTokens(messages: Array<{ content: string | null }>): number {
+  return messages.reduce(
+    (sum, message) => sum + estimateTokens(message.content ?? ''),
+    0,
+  )
 }
 
 /** /compact 的确定性摘要只用本地时钟与固定状态词，不依赖界面语言 */

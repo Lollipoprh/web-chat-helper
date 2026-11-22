@@ -4,7 +4,7 @@
 
 | Module | Files | Lines | Workspace dependencies |
 | --- | ---: | ---: | --- |
-| apps/chrome-extension | 45 | 10524 | `agent-core`, `browser-tools`, `llm-client` |
+| apps/chrome-extension | 45 | 10645 | `agent-core`, `browser-tools`, `llm-client` |
 | packages/agent-core | 6 | 887 | `llm-client` |
 | packages/browser-tools | 3 | 789 | `agent-core` |
 | packages/llm-client | 7 | 871 | - |
@@ -18,13 +18,13 @@
 
 | Path | Lines |
 | --- | ---: |
-| apps/chrome-extension/src/sidepanel/App.tsx | 2040 |
+| apps/chrome-extension/src/sidepanel/App.tsx | 2124 |
 | apps/chrome-extension/src/content/index.ts | 1441 |
 | apps/chrome-extension/src/options/App.tsx | 753 |
 | apps/chrome-extension/src/background/index.ts | 651 |
 | packages/browser-tools/src/tools.ts | 541 |
 | packages/agent-core/src/loop.ts | 540 |
-| apps/chrome-extension/src/shared/i18n.ts | 510 |
+| apps/chrome-extension/src/shared/i18n.ts | 512 |
 | apps/chrome-extension/src/content/input-injection.ts | 508 |
 | packages/llm-client/src/chat.ts | 441 |
 | apps/chrome-extension/src/shared/step-log-storage.ts | 436 |
