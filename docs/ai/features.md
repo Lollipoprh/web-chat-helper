@@ -103,7 +103,7 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 ## Context injection and built-in commands
 
 - Session memory block (previous-run ledger + digest) assembled before every request and placed after history, before the new user message: `apps/chrome-extension/src/sidepanel/memory-assembly.ts` (`buildSessionMemory`, `loadSessionMemory`, `selectPreviousRun`)
-- `/` built-in commands (`/compact`, `/memory`, `/help`, `/clear`): `apps/chrome-extension/src/sidepanel/slash-commands.ts` (`parseSlashCommand`, `runSlashCommand`, `SLASH_COMMANDS`) — intercepted before the provider check; never sent to the model, persisted, or billed
+- `/` built-in commands (`/compact`, `/memory`, `/help`, `/clear`): `apps/chrome-extension/src/sidepanel/slash-commands.ts` (`parseSlashCommand`, `runSlashCommand`, `SLASH_COMMANDS`) — intercepted before the provider check; never sent to the model or billed, and their notice cards are persisted as session messages but filtered out of model context
 - Tool-result hard truncation before entering context: `packages/agent-core/src/loop.ts` (`buildToolContent`, `READ_FILE_CONTENT_LIMIT`, `DEFAULT_TOOL_CONTENT_LIMIT`)
 - Session digest fields and `/compact` writes: `apps/chrome-extension/src/shared/session-storage.ts` (`SessionRecord.digest`, `saveSessionDigest`, `digestThroughMessageId`)
 - `round_limit` results return `pendingCalls` / `signatures` and synthesize their own `tool` replies: `packages/agent-core/src/loop.ts` (`runAgentLoop`)

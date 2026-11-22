@@ -609,17 +609,27 @@ export default function App() {
 
     // 指令回执只存在于前端：刷新即消失，也不会被带进模型请求
     const pushNotice = (content: string) => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content,
-          status: 'complete',
-          createdAt: Date.now(),
-          kind: 'notice',
-        },
-      ])
+      const notice = {
+        id: crypto.randomUUID(),
+        role: 'assistant' as const,
+        content,
+        status: 'complete' as const,
+        createdAt: Date.now(),
+        kind: 'notice' as const,
+      }
+      setMessages((prev) => [...prev, notice])
+      // 指令卡片随会话持久化，切换会话再回来仍可见；请求装配时会按 kind 过滤
+      void appendSessionMessage(sessionId, {
+        id: notice.id,
+        sessionId,
+        role: notice.role,
+        content: notice.content,
+        status: notice.status,
+        createdAt: notice.createdAt,
+        kind: notice.kind,
+      })
+        .then(() => refreshSessions())
+        .catch((error: unknown) => console.warn('[session] 指令卡片落盘失败', error))
     }
 
     const compactSession = async (): Promise<string> => {
@@ -1999,6 +2009,7 @@ function toUiMessage(record: SessionMessageRecord): UiMessage {
     status: record.status,
     createdAt: record.createdAt,
     error: record.error,
+    kind: record.kind,
   }
 }
 

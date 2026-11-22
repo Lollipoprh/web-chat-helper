@@ -50,6 +50,8 @@ export interface SessionMessageRecord {
   status: SessionMessageStatus
   createdAt: number
   error?: string
+  /** 指令回执卡片；持久化并在界面展示，但永不进入模型请求 */
+  kind?: 'notice'
 }
 
 /** 新建空白会话 */
