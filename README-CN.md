@@ -25,6 +25,10 @@
 
 ## 安装
 
+扩展已发布，可直接从 [Chrome 应用商店](https://chromewebstore.google.com/detail/pnomgfddbdoenakfjoleglipgnjimpdp) 安装。[GitHub Releases 发行列表](https://github.com/Lollipoprh/web-chat-helper/releases)中也会发布 `.crx` 安装包。
+
+如需开发，请安装 workspace 依赖：
+
 ```bash
 pnpm install
 ```

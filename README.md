@@ -25,6 +25,10 @@ Out of scope: Playwright/CDP automation, a standalone backend, MCP, multi-agent 
 
 ## Install
 
+Install the published extension from the [Chrome Web Store](https://chromewebstore.google.com/detail/pnomgfddbdoenakfjoleglipgnjimpdp). A `.crx` package is also published in [GitHub Releases](https://github.com/Lollipoprh/web-chat-helper/releases).
+
+For development, install the workspace dependencies:
+
 ```bash
 pnpm install
 ```
