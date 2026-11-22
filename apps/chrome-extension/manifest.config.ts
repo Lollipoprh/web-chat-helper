@@ -11,7 +11,7 @@ export default defineManifest({
   description: '__MSG_extDescription__',
   default_locale: 'zh_CN',
   // 版本号必须与 package.json 保持一致（Chrome 用的是这里声明的值）
-  version: '0.1.5',
+  version: '0.1.6',
 
   // 权限：sidePanel 侧边栏、storage 存储配置、tabs 标签页访问、scripting 注入脚本、activeTab 当前标签页
   // downloads：供 download_file 工具把模型产出的文本另存到系统下载目录（无需用户绑定文件）
