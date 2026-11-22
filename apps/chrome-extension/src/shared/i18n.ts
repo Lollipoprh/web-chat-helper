@@ -39,6 +39,7 @@ const zh = {
   'sidepanel.dropFileFailed': '文件绑定失败，请重试或使用「添加文件」',
   'sidepanel.unbind': '解绑',
   'sidepanel.usageInput': '输入',
+  'sidepanel.usageContext': '当前上下文',
   'sidepanel.usageOutput': '输出',
   'sidepanel.usageWindow': '窗口',
   'sidepanel.grantSite': '授权当前站点',
@@ -154,6 +155,7 @@ const zh = {
   'task.statusFailed': '失败',
   'task.statusCancelled': '已取消',
   'task.statusInterrupted': '已中断',
+  'task.statusRoundLimit': '达到轮次上限',
 
   'history.summary': '共 {count} 个任务，点击查看工具调用明细',
   'history.refresh': '刷新',
@@ -200,6 +202,18 @@ const zh = {
   'sidepanel.roundLimit':
     '已达到 {rounds} 轮工具调用上限，任务已停止。已完成 {calls} 次工具调用。',
   'sidepanel.cancelled': '已取消',
+  'sidepanel.slash.helpTitle': '可用指令',
+  'sidepanel.slash.unknown': '未识别的指令 {name}，输入 /help 查看可用指令',
+  'sidepanel.slash.busy': '任务进行中，请结束后再执行指令',
+  'sidepanel.slash.compactDone':
+    '已压缩：{before} 条消息 → 摘要约 {tokens} tokens（界面消息保留）',
+  'sidepanel.slash.compactEmpty': '当前没有可压缩的任务记录',
+  'sidepanel.slash.compactDesc': '把会话历史压缩为摘要',
+  'sidepanel.slash.memoryDesc': '查看下次请求将注入的记忆',
+  'sidepanel.slash.helpDesc': '列出可用指令',
+  'sidepanel.slash.clearDesc': '清空当前会话',
+  'sidepanel.memory.title': '下次请求将注入的记忆块',
+  'sidepanel.memory.empty': '当前没有可注入的记忆。',
 
   'options.loadProvidersFailed': '读取配置失败：{message}',
   'options.loadLimitsFailed': '读取限额失败：{message}',
@@ -242,6 +256,7 @@ const en: Record<MessageKey, string> = {
   'sidepanel.dropFileFailed': 'Failed to bind the file; try again or use "Add file"',
   'sidepanel.unbind': 'Unbind',
   'sidepanel.usageInput': 'Input',
+  'sidepanel.usageContext': 'Current context',
   'sidepanel.usageOutput': 'Output',
   'sidepanel.usageWindow': 'Window',
   'sidepanel.grantSite': 'Grant access to this site',
@@ -358,6 +373,7 @@ const en: Record<MessageKey, string> = {
   'task.statusFailed': 'Failed',
   'task.statusCancelled': 'Cancelled',
   'task.statusInterrupted': 'Interrupted',
+  'task.statusRoundLimit': 'Round limit reached',
 
   'history.summary': '{count} tasks — click one to see its tool calls',
   'history.refresh': 'Refresh',
@@ -408,6 +424,18 @@ const en: Record<MessageKey, string> = {
   'sidepanel.roundLimit':
     'Reached the {rounds}-round tool-call limit, so the task stopped. {calls} tool calls completed.',
   'sidepanel.cancelled': 'Cancelled',
+  'sidepanel.slash.helpTitle': 'Available commands',
+  'sidepanel.slash.unknown': 'Unknown command {name}. Type /help to list available commands',
+  'sidepanel.slash.busy': 'A task is running; run commands after it finishes',
+  'sidepanel.slash.compactDone':
+    'Compacted: {before} messages → summary of about {tokens} tokens (chat messages kept)',
+  'sidepanel.slash.compactEmpty': 'No task records to compact',
+  'sidepanel.slash.compactDesc': 'Compact the conversation history into a summary',
+  'sidepanel.slash.memoryDesc': 'Preview the memory injected into the next request',
+  'sidepanel.slash.helpDesc': 'List available commands',
+  'sidepanel.slash.clearDesc': 'Clear the current session',
+  'sidepanel.memory.title': 'Memory injected into the next request',
+  'sidepanel.memory.empty': 'No memory to inject right now.',
 
   'options.loadProvidersFailed': 'Failed to read configuration: {message}',
   'options.loadLimitsFailed': 'Failed to read limits: {message}',

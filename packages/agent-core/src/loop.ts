@@ -82,14 +82,17 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
   // 一轮任务可能包含多次模型请求，用量按轮累加；服务不返回 usage 时保持 undefined
   const usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
   let hasUsage = false
+  // 单次请求的输入 token，供宿主校准上下文估算；整轮累加值不能用于校准
+  let lastPromptTokens: number | undefined
 
-  const finish = (stopReason: StopReason, extra?: { error?: string }): AgentRunResult => ({
+  const finish = (stopReason: StopReason, extra: Partial<AgentRunResult> = {}): AgentRunResult => ({
     stopReason,
     rounds,
     finalText,
     logs,
     messages,
     ...(hasUsage ? { usage: { ...usage } } : {}),
+    ...(lastPromptTokens !== undefined ? { lastPromptTokens } : {}),
     ...extra,
   })
 
@@ -125,6 +128,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
 
     if (result.usage) {
       hasUsage = true
+      lastPromptTokens = result.usage.promptTokens
       usage.promptTokens += result.usage.promptTokens
       usage.completionTokens += result.usage.completionTokens
       usage.totalTokens += result.usage.totalTokens
@@ -135,9 +139,25 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       return finish('completed')
     }
 
-    // 已到最后一轮：工具结果没有机会再交给模型，直接停止并报告原因
+    // 已到最后一轮：工具结果没有机会再交给模型。
+    // 但这一轮的 tool_calls 必须各自有应答，否则消息序列不合法，
+    // 后续历史回放会被服务拒绝；因此由 loop 自行合成 round_limit 应答。
     if (rounds >= limits.maxRounds) {
-      return finish('round_limit')
+      for (const call of result.toolCalls) {
+        messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify({
+            ok: false,
+            code: 'round_limit',
+            message: '该调用因达到轮次上限未执行',
+          }),
+        })
+      }
+      return finish('round_limit', {
+        pendingCalls: result.toolCalls,
+        signatures: [...executedSignatures],
+      })
     }
 
     for (const call of result.toolCalls) {
@@ -161,7 +181,7 @@ export async function runAgentLoop(options: AgentRunOptions): Promise<AgentRunRe
       messages.push({
         role: 'tool',
         tool_call_id: call.id,
-        content: JSON.stringify(executed.modelPayload),
+        content: buildToolContent(call.function.name, executed.modelPayload),
       })
     }
 
@@ -255,12 +275,14 @@ async function executeToolCall(params: ExecuteToolParams): Promise<ExecutedToolC
 
   // 4. 重复调用拦截（同一任务内相同工具 + 相同参数）
   //    只读工具允许重复执行：页面变化后重读快照是正常操作，由轮次上限兜底
+  //    签名只在调用真正成功后登记：失败或被拒绝的调用没有产生副作用，
+  //    模型修正上下文后应能重试同一调用（例如先 switch_tab 再 close_tab）
+  let signature: string | undefined
   if (!tool.readOnly) {
-    const signature = `${tool.name}:${stableStringify(validation.value)}`
+    signature = `${tool.name}:${stableStringify(validation.value)}`
     if (params.executedSignatures.has(signature)) {
       return fail('duplicate_call', '与本次任务中已执行过的调用完全相同，已跳过以避免重复副作用')
     }
-    params.executedSignatures.add(signature)
   }
 
   // 5. 副作用动作确认：没有 onConfirmationRequest 时默认允许，保持向后兼容
@@ -300,10 +322,7 @@ async function executeToolCall(params: ExecuteToolParams): Promise<ExecutedToolC
 
     if (!allowed) {
       // 拒绝后也把签名加入已执行列表，防止模型反复尝试相同副作用动作
-      if (!tool.readOnly) {
-        const signature = `${tool.name}:${stableStringify(validation.value)}`
-        params.executedSignatures.add(signature)
-      }
+      if (signature) params.executedSignatures.add(signature)
       return fail(
         'needs_confirmation',
         `用户拒绝执行「${toolName}」。可以调整目标或选择其他动作，但再次请求完全相同的调用会被跳过。`,
@@ -345,6 +364,8 @@ async function executeToolCall(params: ExecuteToolParams): Promise<ExecutedToolC
 
   const durationMs = Date.now() - startedAt
   const ok = result.ok
+  // 成功后才登记签名；失败的副作用调用允许在模型调整前置条件后重试
+  if (ok && signature) params.executedSignatures.add(signature)
   onToolEvent?.({
     id: call.id,
     round,
@@ -409,6 +430,55 @@ function runToolWithTimeout(
         controller.signal.removeEventListener('abort', onAbort)
       })
   })
+}
+
+/** read_file 全文进上下文的上限（字符）；超出后落 P2 的 artifact，P0 只硬截断 */
+export const READ_FILE_CONTENT_LIMIT = 20_000
+/** 其余工具结果（message + data）进上下文的上限（字符） */
+export const DEFAULT_TOOL_CONTENT_LIMIT = 8_000
+
+/**
+ * 工具结果进上下文前的硬截断。
+ * 保持 `{ ok, code?, message, data? }` 形状，只额外加 `truncated: true`；
+ * `data` 被截断后退化为字符串，避免模型把半截 JSON 当成完整结构。
+ */
+export function buildToolContent(toolName: string, payload: Record<string, unknown>): string {
+  const limit = toolName === 'read_file' ? READ_FILE_CONTENT_LIMIT : DEFAULT_TOOL_CONTENT_LIMIT
+  const full = safeStringify(payload)
+  if (full.length <= limit) return full
+
+  const message = typeof payload.message === 'string' ? payload.message : ''
+  const data = payload.data === undefined ? undefined : safeStringify(payload.data)
+
+  const make = (messageBudget: number, dataBudget: number): Record<string, unknown> => {
+    const compact: Record<string, unknown> = {
+      ok: payload.ok === true,
+      ...(payload.code ? { code: payload.code } : {}),
+      message: clipText(message, messageBudget),
+      truncated: true,
+    }
+    if (data !== undefined) compact.data = clipText(data, dataBudget)
+    return compact
+  }
+
+  let messageBudget = limit
+  let dataBudget = data === undefined ? 0 : Math.floor(limit / 2)
+  if (data !== undefined) messageBudget = limit - dataBudget
+
+  let text = safeStringify(make(messageBudget, dataBudget))
+  while (text.length > limit && (messageBudget > 0 || dataBudget > 0)) {
+    if (dataBudget > 0) dataBudget = Math.floor(dataBudget / 2)
+    else messageBudget = Math.floor(messageBudget / 2)
+    text = safeStringify(make(messageBudget, dataBudget))
+  }
+  return text.length <= limit
+    ? text
+    : safeStringify({ ok: payload.ok === true, message: '', truncated: true })
+}
+
+function clipText(text: string, maxChars: number): string {
+  if (maxChars <= 0) return ''
+  return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 1))}…`
 }
 
 const SENSITIVE_KEY_PATTERN = /api[-_]?key|token|secret|password|authorization/i

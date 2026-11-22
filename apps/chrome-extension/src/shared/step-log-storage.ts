@@ -35,6 +35,7 @@ export type LogTaskStatus =
   | 'failed'
   | 'cancelled'
   | 'interrupted'
+  | 'round_limit'
 
 export interface LogTaskRecord {
   taskId: string

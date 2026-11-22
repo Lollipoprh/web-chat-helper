@@ -32,8 +32,11 @@ import {
   createSession,
   deleteSession,
   ensureSessions,
+  getSession,
   listSessions,
   loadSessionMessages,
+  saveSessionContextTokens,
+  saveSessionDigest,
   setActiveSessionId as saveActiveSessionId,
   type SessionMessageRecord,
   type SessionRecord,
@@ -49,6 +52,7 @@ import { useI18n } from '../shared/useI18n'
 import {
   deleteTasksForSession,
   finishTask,
+  listSessionTasks,
   markInterruptedTasks,
   pruneLogs,
   recordStep,
@@ -78,6 +82,13 @@ import { MessageBubble, type MessageStatus } from './components/MessageBubble'
 import { ModelPicker } from './components/ModelPicker'
 import { ToolEventItem } from './components/ToolEventItem'
 import { UsageMeter } from './components/UsageMeter'
+import { loadSessionMemory } from './memory-assembly'
+import {
+  SLASH_COMMANDS,
+  parseSlashCommand,
+  runSlashCommand,
+  type ParsedSlashCommand,
+} from './slash-commands'
 import { Alert, Button, Select, TextArea, color, fontSize, radius, space } from '../ui'
 import {
   bindFile,
@@ -126,6 +137,8 @@ interface UiMessage {
   error?: string
   /** 本轮助手回复中发生的工具调用，仅当前会话可见 */
   toolEvents?: AgentToolEvent[]
+  /** 指令回执等仅存在于前端的提示，刷新即消失，且永不进入模型请求 */
+  kind?: 'notice'
 }
 
 export default function App() {
@@ -145,6 +158,9 @@ export default function App() {
   const [view, setView] = useState<'chat' | 'history'>('chat')
   const [input, setInput] = useState('')
   const [generating, setGenerating] = useState(false)
+  // `/` 指令补全：Esc 关闭后保持关闭，直到输入再次变化
+  const [slashMenuDismissed, setSlashMenuDismissed] = useState(false)
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0)
   const [banner, setBanner] = useState<string | null>(null)
   // 当前会话消息是否已加载完成，加载期间禁止切换会话
   const [historyLoaded, setHistoryLoaded] = useState(false)
@@ -174,6 +190,8 @@ export default function App() {
     inputTokens: 0,
     outputTokens: 0,
   })
+  // 当前上下文占用估算：进度条按它绘制，/compact 后立即下降
+  const [contextTokens, setContextTokens] = useState(0)
   // 拖拽文件到会话框/输入框时的高亮提示
   const [dragActive, setDragActive] = useState(false)
 
@@ -246,6 +264,7 @@ export default function App() {
           inputTokens: active?.inputTokens ?? 0,
           outputTokens: active?.outputTokens ?? 0,
         })
+        setContextTokens(recordedContextTokens(active))
         if (checkpoint) setInterruptedCheckpoint(checkpoint)
         setSkipConfirm(skip)
         setAgentLimits(limits)
@@ -353,6 +372,7 @@ export default function App() {
     setPendingPageOrigin(null)
     setPendingConfirmation(null)
     setTokenUsage({ inputTokens: 0, outputTokens: 0 })
+    setContextTokens(0)
     await Promise.all([clearSessionMessages(activeSessionId), clearAgentCheckpoint()])
     setInterruptedCheckpoint(null)
     void refreshSessions()
@@ -378,6 +398,7 @@ export default function App() {
           inputTokens: target?.inputTokens ?? 0,
           outputTokens: target?.outputTokens ?? 0,
         })
+        setContextTokens(recordedContextTokens(target))
         setActiveSessionId(sessionId)
         await saveActiveSessionId(sessionId)
       } catch (error) {
@@ -400,6 +421,7 @@ export default function App() {
       setMessages([])
       setBoundFiles([])
       setTokenUsage({ inputTokens: 0, outputTokens: 0 })
+      setContextTokens(0)
       setBanner(null)
       setPendingPageOrigin(null)
       setPendingConfirmation(null)
@@ -436,6 +458,7 @@ export default function App() {
         inputTokens: next.inputTokens ?? 0,
         outputTokens: next.outputTokens ?? 0,
       })
+      setContextTokens(recordedContextTokens(next))
       setView('chat')
       setBanner(null)
     } catch (error) {
@@ -590,7 +613,158 @@ export default function App() {
     const text = (textOverride ?? input).trim()
     const sessionId = sessionOverride ?? activeSessionId
     const priorMessages = historyOverride ?? messages
-    if (!text || generating || !provider || !sessionId) return
+    if (!text || !sessionId) return
+
+    // 指令回执只存在于前端：刷新即消失，也不会被带进模型请求
+    const pushNotice = (content: string) => {
+      const notice = {
+        id: crypto.randomUUID(),
+        role: 'assistant' as const,
+        content,
+        status: 'complete' as const,
+        createdAt: Date.now(),
+        kind: 'notice' as const,
+      }
+      setMessages((prev) => [...prev, notice])
+      // 指令卡片随会话持久化，切换会话再回来仍可见；请求装配时会按 kind 过滤
+      void appendSessionMessage(sessionId, {
+        id: notice.id,
+        sessionId,
+        role: notice.role,
+        content: notice.content,
+        status: notice.status,
+        createdAt: notice.createdAt,
+        kind: notice.kind,
+      })
+        .then(() => refreshSessions())
+        .catch((error: unknown) => console.warn('[session] 指令卡片落盘失败', error))
+    }
+
+    const compactSession = async (): Promise<string> => {
+      const tasks = await listSessionTasks(sessionId)
+      if (tasks.length === 0) return t('sidepanel.slash.compactEmpty')
+      const before = priorMessages.filter((message) => message.kind !== 'notice').length
+      // 确定性摘要：只用任务目标、状态与轮次，不调模型、不产生费用
+      const digest = tasks
+        .slice(0, 10)
+        .reverse()
+        .map(
+          (task) =>
+            `- ${formatClock(task.createdAt)} ${task.goal} → ${taskStatusLabel(task.status)}（${task.rounds} 轮）`,
+        )
+        .join('\n')
+      const last = [...priorMessages]
+        .reverse()
+        .find(
+          (message) =>
+            message.kind !== 'notice' &&
+            message.status === 'complete' &&
+            Boolean(message.content),
+        )
+      const digestTokens = Math.max(1, Math.ceil(digest.length / 2))
+      await saveSessionDigest(sessionId, {
+        digest,
+        digestTokens,
+        digestThroughMessageId: last?.id,
+      })
+
+      // 压缩后立即同步进度条：下一次请求只剩 system + 工具 schema + digest + 游标之后的历史
+      const cursorIndex = last
+        ? priorMessages.findIndex((message) => message.id === last.id)
+        : -1
+      const remaining = priorMessages
+        .slice(cursorIndex + 1)
+        .filter(
+          (message) =>
+            message.kind !== 'notice' &&
+            message.status === 'complete' &&
+            Boolean(message.content),
+        )
+      const nextContext =
+        estimateTokens(SYSTEM_PROMPT) +
+        TOOL_SCHEMA_TOKEN_ESTIMATE +
+        digestTokens +
+        estimateMessagesTokens(remaining)
+      setContextTokens(nextContext)
+      setSessions((prev) =>
+        prev.map((session) =>
+          session.sessionId === sessionId ? { ...session, contextTokens: nextContext } : session,
+        ),
+      )
+      try {
+        await saveSessionContextTokens(sessionId, nextContext)
+      } catch (error) {
+        console.warn('[session] 写入上下文占用失败', error)
+      }
+      await refreshSessions()
+      return t('sidepanel.slash.compactDone', { before, tokens: digestTokens })
+    }
+
+    const previewMemory = async (): Promise<string> => {
+      const record =
+        sessions.find((session) => session.sessionId === sessionId) ??
+        (await getSession(sessionId))
+      const lastUser = [...priorMessages]
+        .reverse()
+        .find((message) => message.role === 'user' && message.kind !== 'notice')
+      const memory = await loadSessionMemory({
+        sessionId,
+        digest: record?.digest,
+        currentGoal: lastUser?.content ?? input.trim(),
+        maxRounds: agentLimits?.maxRounds ?? 50,
+      })
+      return memory.text
+    }
+
+    const executeSlashCommand = async (command: ParsedSlashCommand) => {
+      if (generating) {
+        setBanner(t('sidepanel.slash.busy'))
+        return
+      }
+      try {
+        const outcome = await runSlashCommand(command, {
+          compact: compactSession,
+          memory: previewMemory,
+          help: () =>
+            [
+              t('sidepanel.slash.helpTitle'),
+              ...SLASH_COMMANDS.map((item) => `${item.usage} — ${t(item.descriptionKey)}`),
+            ].join('\n'),
+        })
+        if (outcome.kind === 'clear') {
+          await handleClear()
+          return
+        }
+        if (outcome.kind === 'memory') {
+          pushNotice(
+            `${t('sidepanel.memory.title')}\n\n${outcome.text || t('sidepanel.memory.empty')}`,
+          )
+          return
+        }
+        if (outcome.text) pushNotice(outcome.text)
+      } catch (error) {
+        console.warn('[slash] 指令执行失败', error)
+        setBanner(describeError(error))
+      }
+    }
+
+    const parsed = parseSlashCommand(text)
+    if (parsed.type === 'unknown') {
+      if (textOverride === undefined) setInput('')
+      if (generating) {
+        setBanner(t('sidepanel.slash.busy'))
+        return
+      }
+      pushNotice(t('sidepanel.slash.unknown', { name: `/${parsed.name}` }))
+      return
+    }
+    if (parsed.type === 'command') {
+      if (textOverride === undefined) setInput('')
+      await executeSlashCommand(parsed.command)
+      return
+    }
+
+    if (generating || !provider) return
 
     const endpoint = parseEndpoint(provider.baseUrl)
     if (!endpoint.ok) {
@@ -642,8 +816,15 @@ export default function App() {
       createdAt: now + 1,
     }
 
-    // 仅完整消息进入上下文
-    const history: LlmChatMessage[] = [...priorMessages, userMessage]
+    // 仅完整消息进入上下文；/compact 之前的消息由 digest 覆盖，不再重复发送
+    const sessionRecord = sessions.find((session) => session.sessionId === sessionId)
+    let visiblePrior = priorMessages.filter((message) => message.kind !== 'notice')
+    const digestCursor = sessionRecord?.digestThroughMessageId
+    if (digestCursor) {
+      const cursorIndex = visiblePrior.findIndex((message) => message.id === digestCursor)
+      if (cursorIndex >= 0) visiblePrior = visiblePrior.slice(cursorIndex + 1)
+    }
+    const history: LlmChatMessage[] = visiblePrior
       .filter((message) => message.status === 'complete' && message.content)
       .map((message) => ({ role: message.role, content: message.content }))
 
@@ -653,6 +834,31 @@ export default function App() {
     setBanner(pageWarning)
     setPendingPageOrigin(null)
     setGenerating(true)
+
+    // 先挂上取消句柄，让记忆装配期间点击停止也能生效
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    // 记忆块在历史之后、本轮用户消息之前；每轮重建，完成态 run 不注入账本。
+    // 必须在 recordTaskStart 之前读取，否则会读到本轮尚未收尾的任务。
+    let memoryText = ''
+    try {
+      const memory = await loadSessionMemory({
+        sessionId,
+        digest: sessionRecord?.digest,
+        currentGoal: text,
+        maxRounds: agentLimits?.maxRounds ?? 50,
+      })
+      memoryText = memory.text
+    } catch (error) {
+      console.warn('[memory] 记忆块装配失败', error)
+    }
+    const requestMessages: LlmChatMessage[] = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...history,
+      ...(memoryText ? [{ role: 'system' as const, content: memoryText }] : []),
+      { role: 'user', content: text },
+    ]
 
     // 用户消息立即落盘；助手消息等结束后一次性写入，流式中间态不入库
     void appendSessionMessage(sessionId, {
@@ -665,9 +871,6 @@ export default function App() {
     })
       .then(() => refreshSessions())
       .catch((error: unknown) => console.warn('[session] 用户消息落盘失败', error))
-
-    const controller = new AbortController()
-    abortRef.current = controller
 
     // 任务 ID 在发送时确定，日志、检查点与会话共用，便于按任务检索
     const taskId = crypto.randomUUID()
@@ -685,6 +888,8 @@ export default function App() {
     let assistantError: string | undefined
     // 本轮任务消耗的 token，任务结束后累加到会话统计
     let runUsage: TokenUsage | null = null
+    // 单次请求的输入 token，用于更新上下文进度条（累计用量不能反映当前占用）
+    let runLastPromptTokens: number | undefined
 
     const finalize = (status: MessageStatus, error?: string) => {
       assistantStatus = status
@@ -769,10 +974,7 @@ export default function App() {
             supportsToolCalls: true,
           },
           tools: registry,
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            ...history,
-          ],
+          messages: requestMessages,
           limits: agentLimits ?? undefined,
           tabId: boundTabId,
           taskId,
@@ -818,13 +1020,16 @@ export default function App() {
         })
 
         runUsage = result.usage ?? null
+        runLastPromptTokens = result.lastPromptTokens ?? result.usage?.promptTokens
 
         taskStatus =
-          result.stopReason === 'completed' || result.stopReason === 'round_limit'
+          result.stopReason === 'completed'
             ? 'completed'
-            : result.stopReason === 'cancelled'
-              ? 'cancelled'
-              : 'failed'
+            : result.stopReason === 'round_limit'
+              ? 'round_limit'
+              : result.stopReason === 'cancelled'
+                ? 'cancelled'
+                : 'failed'
         taskStopReason = result.stopReason
 
         // 非流式时没有增量回调，直接用最终文本回填
@@ -857,16 +1062,18 @@ export default function App() {
           chatCompletionsUrl: endpoint.endpoint.chatCompletionsUrl,
           apiKey: provider.apiKey,
           model: provider.model,
-          messages: history,
+          messages: requestMessages,
           signal: controller.signal,
         }
 
         if (provider.supportsStreaming) {
           const result = await streamChatCompletion(request, appendDelta)
           runUsage = result.usage ?? null
+          runLastPromptTokens = result.usage?.promptTokens
         } else {
           const result = await createChatCompletion(request)
           runUsage = result.usage ?? null
+          runLastPromptTokens = result.usage?.promptTokens
           assistantContent = result.content
           setMessages((prev) =>
             prev.map((message) =>
@@ -918,6 +1125,24 @@ export default function App() {
         }
       }
 
+      // 进度条展示"当前上下文"：优先用服务端返回的单次 promptTokens，拿不到时按请求内容估算
+      const nextContext =
+        runLastPromptTokens ??
+        estimateMessagesTokens(requestMessages) + TOOL_SCHEMA_TOKEN_ESTIMATE
+      if (nextContext > 0) {
+        setContextTokens(nextContext)
+        setSessions((prev) =>
+          prev.map((session) =>
+            session.sessionId === sessionId ? { ...session, contextTokens: nextContext } : session,
+          ),
+        )
+        try {
+          await saveSessionContextTokens(sessionId, nextContext)
+        } catch (error) {
+          console.warn('[session] 写入上下文占用失败', error)
+        }
+      }
+
       // 任务可能写过绑定文件，结束后刷新文件列表的大小/修改时间
       void refreshBoundFiles(sessionId)
       // 任务正常结束（含取消/错误）后清除检查点；只有意外关闭 Side Panel 时会留下
@@ -945,7 +1170,51 @@ export default function App() {
     }
   }
 
+  // `/` 指令补全只在输入是单个指令词时出现；一旦开始输入参数就隐藏
+  const slashQuery =
+    input.startsWith('/') && !/\s/.test(input) ? input.slice(1).toLowerCase() : null
+  const slashMatches =
+    slashQuery === null
+      ? []
+      : SLASH_COMMANDS.filter((command) => command.name.startsWith(slashQuery))
+  const showSlashMenu = !generating && slashMatches.length > 0 && !slashMenuDismissed
+  const slashActive = Math.min(slashActiveIndex, Math.max(0, slashMatches.length - 1))
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (showSlashMenu) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setSlashActiveIndex((index) => (index + 1) % slashMatches.length)
+        return
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setSlashActiveIndex(
+          (index) => (index - 1 + slashMatches.length) % slashMatches.length,
+        )
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setSlashMenuDismissed(true)
+        return
+      }
+      if (
+        (event.key === 'Enter' || event.key === 'Tab') &&
+        !event.shiftKey &&
+        !event.nativeEvent.isComposing
+      ) {
+        event.preventDefault()
+        const command = slashMatches[slashActive]
+        if (command) {
+          setInput('')
+          setSlashMenuDismissed(false)
+          void handleSend(`/${command.name}`)
+        }
+        return
+      }
+    }
+
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
       void handleSend()
@@ -1165,6 +1434,7 @@ export default function App() {
       <UsageMeter
         inputTokens={tokenUsage.inputTokens}
         outputTokens={tokenUsage.outputTokens}
+        contextTokens={contextTokens}
         contextWindow={provider?.contextWindow ?? DEFAULT_CONTEXT_WINDOW}
       />
 
@@ -1339,12 +1609,31 @@ export default function App() {
                         </div>
                       )}
 
-                    <MessageBubble
-                      role={message.role}
-                      content={message.content}
-                      status={message.status}
-                      error={message.error}
-                    />
+                    {message.kind === 'notice' ? (
+                      <div
+                        style={{
+                          maxWidth: '92%',
+                          padding: '8px 11px',
+                          borderRadius: radius.md,
+                          border: `1px dashed ${color.border}`,
+                          background: color.surfaceSubtle,
+                          color: color.textMuted,
+                          fontSize: fontSize.sm,
+                          lineHeight: 1.6,
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {message.content}
+                      </div>
+                    ) : (
+                      <MessageBubble
+                        role={message.role}
+                        content={message.content}
+                        status={message.status}
+                        error={message.error}
+                      />
+                    )}
                   </div>
                 ))
               )}
@@ -1447,9 +1736,75 @@ export default function App() {
                 overflow: 'hidden',
               }}
             >
+              {showSlashMenu && (
+                <div
+                  role="listbox"
+                  aria-label={t('sidepanel.slash.helpTitle')}
+                  style={{
+                    maxHeight: 168,
+                    overflowY: 'auto',
+                    padding: 4,
+                    borderBottom: `1px solid ${color.borderMuted}`,
+                    background: color.surfaceSubtle,
+                  }}
+                >
+                  {slashMatches.map((command, index) => {
+                    const active = index === slashActive
+                    return (
+                      <button
+                        key={command.name}
+                        type="button"
+                        role="option"
+                        aria-selected={active}
+                        onMouseDown={(event) => {
+                          // 防止 textarea 失焦导致点击被吞掉
+                          event.preventDefault()
+                          setInput('')
+                          setSlashMenuDismissed(false)
+                          void handleSend(`/${command.name}`)
+                        }}
+                        onMouseEnter={() => setSlashActiveIndex(index)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'baseline',
+                          gap: space.sm,
+                          width: '100%',
+                          padding: '5px 8px',
+                          border: 'none',
+                          borderRadius: radius.sm,
+                          background: active ? color.surfaceMuted : 'transparent',
+                          color: active ? color.text : color.textSecondary,
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                          fontSize: fontSize.sm,
+                          textAlign: 'left',
+                        }}
+                      >
+                        <span style={{ fontWeight: 600, flex: 'none' }}>{command.usage}</span>
+                        <span
+                          style={{
+                            minWidth: 0,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            fontSize: fontSize.xs,
+                            color: color.textFaint,
+                          }}
+                        >
+                          {t(command.descriptionKey)}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
               <TextArea
                 value={input}
-                onChange={(event) => setInput(event.target.value)}
+                onChange={(event) => {
+                  setInput(event.target.value)
+                  setSlashMenuDismissed(false)
+                  setSlashActiveIndex(0)
+                }}
                 onKeyDown={handleKeyDown}
                 placeholder={
                   provider
@@ -1715,5 +2070,54 @@ function toUiMessage(record: SessionMessageRecord): UiMessage {
     status: record.status,
     createdAt: record.createdAt,
     error: record.error,
+    kind: record.kind,
+  }
+}
+
+/** 当前上下文占用：新记录读取 contextTokens，旧记录退回累计输入 token */
+function recordedContextTokens(session?: SessionRecord | null): number {
+  if (!session) return 0
+  return session.contextTokens ?? session.inputTokens ?? 0
+}
+
+/** 工具 schema 的粗略 token 开销，仅在服务端未返回 usage 时用于进度条兜底 */
+const TOOL_SCHEMA_TOKEN_ESTIMATE = 3_500
+const CJK_PATTERN = /[\u3000-\u9fff\uff00-\uffef]/g
+
+/** CJK 按 1 字符≈1 token，其余按 4 字符≈1 token，仅用于进度条估算 */
+function estimateTokens(text: string): number {
+  const cjk = text.match(CJK_PATTERN)?.length ?? 0
+  return Math.ceil(cjk + (text.length - cjk) / 4)
+}
+
+function estimateMessagesTokens(messages: Array<{ content: string | null }>): number {
+  return messages.reduce(
+    (sum, message) => sum + estimateTokens(message.content ?? ''),
+    0,
+  )
+}
+
+/** /compact 的确定性摘要只用本地时钟与固定状态词，不依赖界面语言 */
+function formatClock(timestamp: number): string {
+  const date = new Date(timestamp)
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${hours}:${minutes}`
+}
+
+function taskStatusLabel(status: LogTaskStatus): string {
+  switch (status) {
+    case 'completed':
+      return '完成'
+    case 'round_limit':
+      return '达到轮次上限'
+    case 'cancelled':
+      return '用户停止'
+    case 'interrupted':
+      return '异常中断'
+    case 'failed':
+      return '失败'
+    default:
+      return '进行中'
   }
 }

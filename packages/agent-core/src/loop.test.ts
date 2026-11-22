@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createChatCompletion, type ChatResult, type ToolCall } from 'llm-client'
-import { previewArgs, runAgentLoop } from './loop'
+import { buildToolContent, previewArgs, runAgentLoop } from './loop'
 import { ToolRegistry } from './registry'
 import type { AgentTool, ToolResult } from './types'
 
@@ -73,6 +73,34 @@ describe('runAgentLoop', () => {
     expect(result.rounds).toBe(3)
     expect(execute).toHaveBeenCalledTimes(1)
     expect(result.logs.map((log) => log.code)).toEqual([undefined, 'duplicate_call'])
+  })
+
+  it('allows retrying a side-effecting call that failed earlier in the task', async () => {
+    let closeTabCalls = 0
+    const closeTab = vi.fn(async (): Promise<ToolResult> => {
+      closeTabCalls += 1
+      return closeTabCalls === 1
+        ? { ok: false, code: 'invalid_args', message: '不能关闭任务绑定页' }
+        : { ok: true, message: 'closed' }
+    })
+    const switchTab = vi.fn(async (): Promise<ToolResult> => ({ ok: true, message: 'switched' }))
+    const registry = new ToolRegistry()
+      .register(freeFormTool(closeTab, { name: 'close_tab' }))
+      .register(freeFormTool(switchTab, { name: 'switch_tab', readOnly: true }))
+
+    mockedCreate
+      .mockResolvedValueOnce(resultWith([toolCall('close_tab', { tab_id: 123 })]))
+      .mockResolvedValueOnce(
+        resultWith([toolCall('switch_tab', { tab_id: 456 }, 'call_2')]),
+      )
+      .mockResolvedValueOnce(resultWith([toolCall('close_tab', { tab_id: 123 }, 'call_3')]))
+      .mockResolvedValueOnce(resultWith([]))
+
+    const result = await runAgentLoop({ chat, tools: registry, messages: [] })
+
+    expect(result.stopReason).toBe('completed')
+    expect(closeTab).toHaveBeenCalledTimes(2)
+    expect(result.logs.map((log) => log.code)).toEqual(['invalid_args', undefined, undefined])
   })
 
   it('allows repeated calls to read-only tools', async () => {
@@ -172,6 +200,15 @@ describe('runAgentLoop', () => {
     expect(result.stopReason).toBe('round_limit')
     expect(result.rounds).toBe(2)
     expect(execute).toHaveBeenCalledTimes(1)
+    expect(result.pendingCalls?.map((call) => call.id)).toEqual(['call_1'])
+
+    // 未执行的 tool_calls 必须有应答，否则消息序列不合法
+    const lastMessage = result.messages[result.messages.length - 1]
+    expect(lastMessage.role).toBe('tool')
+    if (lastMessage.role === 'tool') {
+      expect(lastMessage.tool_call_id).toBe('call_1')
+      expect(lastMessage.content).toContain('round_limit')
+    }
   })
 
   it('accumulates usage across model requests', async () => {
@@ -216,6 +253,35 @@ describe('runAgentLoop', () => {
 
     expect(result.logs[0].code).toBe('timeout')
     expect(result.stopReason).toBe('completed')
+  })
+})
+
+describe('buildToolContent', () => {
+  it('keeps small payloads intact', () => {
+    const content = buildToolContent('click_element', { ok: true, message: 'clicked' })
+    expect(JSON.parse(content)).toEqual({ ok: true, message: 'clicked' })
+  })
+
+  it('hard-truncates oversized results and keeps a valid shape', () => {
+    const content = buildToolContent('read_file', {
+      ok: true,
+      message: 'read',
+      data: 'x'.repeat(50_000),
+    })
+    expect(content.length).toBeLessThanOrEqual(20_000)
+    const parsed = JSON.parse(content) as Record<string, unknown>
+    expect(parsed.ok).toBe(true)
+    expect(parsed.truncated).toBe(true)
+  })
+
+  it('uses the 8k limit for non-file tools', () => {
+    const content = buildToolContent('get_page_snapshot', {
+      ok: true,
+      message: 'snapshot',
+      data: 'y'.repeat(30_000),
+    })
+    expect(content.length).toBeLessThanOrEqual(8_000)
+    expect((JSON.parse(content) as Record<string, unknown>).truncated).toBe(true)
   })
 })
 

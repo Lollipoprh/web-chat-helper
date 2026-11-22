@@ -8,6 +8,34 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
 本文件记录 Web Chat Helper 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.6] - 2026-11-22
+
+### Added / 新增
+
+- **Automatic session memory** — every request now carries a `<session-memory>` block built from
+  the previous abnormal run's ledger and the session digest, so a stopped or round-limited task
+  can be continued by simply sending the next message.
+  **自动会话记忆** —— 每次请求自动携带由上一段非正常结束运行账本与会话摘要组成的
+  `<session-memory>` 块，中断或跑满轮次后直接发下一句即可续跑。
+- **Built-in `/` commands** — `/compact`, `/memory`, `/help`, `/clear`, with an arrow-key
+  completion menu in the composer. Notice cards are persisted with the session but never sent
+  to the model.
+  **`/` 内置指令** —— 支持 `/compact`、`/memory`、`/help`、`/clear`，输入框提供方向键补全；
+  指令回执随会话持久化，但不会进入模型上下文。
+
+### Changed / 变更
+
+- **Context meter reflects the current context** — the progress bar now tracks the latest
+  request's prompt tokens instead of cumulative session usage, and `/compact` lowers it
+  immediately.
+  **用量条展示当前上下文** —— 进度条改为跟随最近一次请求的 prompt tokens，
+  `/compact` 后立即回落。
+- **Default context window is 1M** — new providers start with a 1,000,000-token window.
+  **默认上下文窗口 1M** —— 新建供应商默认使用 1,000,000 tokens。
+- **`round_limit` is a distinct task status** — the loop synthesizes replies for unexecuted
+  tool calls and exposes them as pending calls.
+  **`round_limit` 独立状态** —— 达到轮次上限时由 loop 为未执行调用补齐应答并暴露给宿主。
+
 ## [0.1.5] - 2026-11-21
 
 ### Added / 新增
@@ -329,7 +357,8 @@ model continues decision or gives the final answer.
   may still change. Check future release notes before upgrading.
   首个版本，供应商配置结构、跨上下文消息协议与工具参数仍可能调整，升级前请留意后续变更说明。
 
-[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.6
 [0.1.5]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.5
 [0.1.4]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.4
 [0.1.3]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.3
