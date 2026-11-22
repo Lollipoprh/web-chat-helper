@@ -1,6 +1,6 @@
 // Agent 核心类型：工具接口、统一结果、日志与停止原因
 
-import type { ChatMessage, TokenUsage } from 'llm-client'
+import type { ChatMessage, TokenUsage, ToolCall } from 'llm-client'
 import type { JsonSchema } from './validation'
 
 export type ToolErrorCode =
@@ -16,6 +16,7 @@ export type ToolErrorCode =
   | 'stale_element'
   | 'execution_failed'
   | 'needs_confirmation'
+  | 'round_limit'
 
 /** 统一工具结果：既回传给模型，也用于界面展示 */
 export interface ToolResult {
@@ -109,4 +110,10 @@ export interface AgentRunResult {
   messages: ChatMessage[]
   /** 本次任务内所有模型请求累计的 token 用量；服务未返回时为 undefined */
   usage?: TokenUsage
+  /** 最后一次模型请求的输入 token，用于校准上下文估算；服务未返回时为 undefined */
+  lastPromptTokens?: number
+  /** stopReason 为 round_limit 时本回合未执行的调用，供宿主展示与账本记录 */
+  pendingCalls?: ToolCall[]
+  /** 本次运行中已登记的副作用调用签名，供宿主跨段继承 */
+  signatures?: string[]
 }

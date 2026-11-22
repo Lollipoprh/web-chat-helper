@@ -23,7 +23,7 @@ export interface ProviderConfig {
 }
 
 /** 上下文窗口默认值：用户未填写时的兜底 */
-export const DEFAULT_CONTEXT_WINDOW = 128_000
+export const DEFAULT_CONTEXT_WINDOW = 1_000_000
 
 /** 创建新供应商时的初始值，id 与时间戳由调用方补齐 */
 export type ProviderDraft = Omit<ProviderConfig, 'id' | 'createdAt' | 'updatedAt'>

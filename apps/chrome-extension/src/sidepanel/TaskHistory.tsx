@@ -28,6 +28,7 @@ const STATUS_LABELS: Record<LogTaskStatus, MessageKey> = {
   failed: 'task.statusFailed',
   cancelled: 'task.statusCancelled',
   interrupted: 'task.statusInterrupted',
+  round_limit: 'task.statusRoundLimit',
 }
 
 const STATUS_TONES: Record<LogTaskStatus, BadgeTone> = {
@@ -36,6 +37,7 @@ const STATUS_TONES: Record<LogTaskStatus, BadgeTone> = {
   failed: 'danger',
   cancelled: 'neutral',
   interrupted: 'warning',
+  round_limit: 'warning',
 }
 
 export default function TaskHistory({ sessionId }: TaskHistoryProps) {

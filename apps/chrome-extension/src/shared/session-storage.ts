@@ -32,6 +32,14 @@ export interface SessionRecord {
   inputTokens?: number
   /** 会话内所有请求累计的输出 token */
   outputTokens?: number
+  /** 会话摘要：历史过长时由 /compact 生成，只在请求中注入，不删除界面消息 */
+  digest?: string
+  /** 摘要的估算 token 数，用于预算提示 */
+  digestTokens?: number
+  /** 最近一次压缩时间 */
+  compactedAt?: number
+  /** 摘要覆盖到的最后一条消息；历史从它之后开始取，避免摘要与历史重复计费 */
+  digestThroughMessageId?: string
 }
 
 export interface SessionMessageRecord {
@@ -139,6 +147,10 @@ export async function clearSessionMessages(sessionId: string): Promise<void> {
       messageCount: 0,
       inputTokens: 0,
       outputTokens: 0,
+      digest: undefined,
+      digestTokens: undefined,
+      compactedAt: undefined,
+      digestThroughMessageId: undefined,
       updatedAt: Date.now(),
     })
   }
@@ -178,6 +190,46 @@ export async function addSessionUsage(
       ...session,
       inputTokens: (session.inputTokens ?? 0) + inputTokens,
       outputTokens: (session.outputTokens ?? 0) + outputTokens,
+    })
+  }
+  await txDone(tx)
+}
+
+/** 读取单个会话；不存在时返回 null */
+export async function getSession(sessionId: string): Promise<SessionRecord | null> {
+  const db = await openLocalDb()
+  const tx = db.transaction(SESSION_STORE, 'readonly')
+  const record = await requestResult<SessionRecord | undefined>(
+    tx.objectStore(SESSION_STORE).get(sessionId) as IDBRequest<SessionRecord | undefined>,
+  )
+  return record ?? null
+}
+
+/**
+ * 写入会话摘要（/compact 的结果）。
+ * 只影响请求装配，不删除任何界面消息。
+ */
+export async function saveSessionDigest(
+  sessionId: string,
+  input: {
+    digest: string
+    digestTokens?: number
+    digestThroughMessageId?: string
+  },
+): Promise<void> {
+  const db = await openLocalDb()
+  const tx = db.transaction(SESSION_STORE, 'readwrite')
+  const store = tx.objectStore(SESSION_STORE)
+  const session = await requestResult<SessionRecord | undefined>(
+    store.get(sessionId) as IDBRequest<SessionRecord | undefined>,
+  )
+  if (session) {
+    store.put({
+      ...session,
+      digest: input.digest,
+      digestTokens: input.digestTokens,
+      digestThroughMessageId: input.digestThroughMessageId,
+      compactedAt: Date.now(),
     })
   }
   await txDone(tx)
