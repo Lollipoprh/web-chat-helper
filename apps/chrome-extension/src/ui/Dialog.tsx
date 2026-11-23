@@ -177,7 +177,8 @@ export function Dialog({
 
         <div
           style={{
-            padding: `0 ${space.xl}px ${footer ? space.lg : space.xl}px`,
+            // 顶部留出 4px：输入框的焦点环是 3px 的 box-shadow，会被这个滚动容器裁掉上边
+            padding: `${space.xs}px ${space.xl}px ${footer ? space.lg : space.xl}px`,
             overflowY: 'auto',
             color: color.textSecondary,
             fontSize: fontSize.md,
