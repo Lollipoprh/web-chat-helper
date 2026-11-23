@@ -26,6 +26,8 @@ export interface DropdownProps {
   align?: 'start' | 'end'
   /** 面板期望宽度；实际会按视口收窄 */
   width?: number
+  /** 面板语义：纯菜单用 menu，内部含搜索框等复合控件时用 dialog */
+  panelRole?: 'menu' | 'dialog'
   disabled?: boolean
   triggerStyle?: CSSProperties
   className?: string
@@ -38,6 +40,7 @@ export function Dropdown({
   triggerLabel,
   align = 'start',
   width = 260,
+  panelRole = 'menu',
   disabled = false,
   triggerStyle,
   className,
@@ -75,11 +78,11 @@ export function Dropdown({
   }, [open, align, width])
 
   // 打开后把焦点移到第一项，键盘用户可以直接回车选择；
-  // 菜单里带搜索框时优先聚焦输入框，打开即可输入
+  // 菜单里带搜索框时优先聚焦输入框，搜索框只在会话多时出现
   useEffect(() => {
     if (!open || !pos) return
     const first = panelRef.current?.querySelector<HTMLElement>(
-      'input, [role="menuitem"]:not([disabled])',
+      'input:not([disabled]), [role="menuitem"]:not([disabled]), button:not([disabled])',
     )
     first?.focus()
   }, [open, pos])
@@ -153,7 +156,7 @@ export function Dropdown({
         createPortal(
           <div
             ref={panelRef}
-            role="menu"
+            role={panelRole}
             aria-label={triggerLabel}
             className="ui-menu"
             style={{

@@ -45,8 +45,8 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 ## Side panel UI and chat interaction
 
 - Main UI: `apps/chrome-extension/src/sidepanel/App.tsx`
-- Header (HUD): brand mark + session title that opens the session `Dropdown` menu, a status pill (`sidepanel.statusRunning` / `statusAwaiting`, only while active) and the settings `IconButton`
-- Session menu content: `apps/chrome-extension/src/sidepanel/components/SessionMenu.tsx` — search box (shown once there are more than four sessions), session list, then new / rename / clear / delete / task records
+- Header (HUD): brand mark + session title, then rename / new / delete `IconButton`s, the run status pill (`sidepanel.statusRunning` / `statusAwaiting`, only while active) and the settings `IconButton`. The title is capped at `TITLE_MAX_WIDTH` so the action icons always fit
+- Session menu content: `apps/chrome-extension/src/sidepanel/components/SessionMenu.tsx` — search box (from five sessions up) and one row per session with switch + per-row delete on the right. Creating, renaming and deleting the active session live in the header; clearing is the `/clear` command and task records stay behind the right-edge pull tab
 - Session rename: `renameSession` in `apps/chrome-extension/src/shared/session-storage.ts` (deliberately leaves `updatedAt` alone so renaming does not reorder the list), driven by `renameDraft` state in `App.tsx` through the shared `Dialog` + `Input`
 - Session actions live in the header menu, not in a toolbar row — `apps/chrome-extension/src/ui/Menu.tsx` (`Dropdown`, `MenuItem`)
 - Composer: one-line `TextArea` that grows to `COMPOSER_MAX_HEIGHT`, then a control row with `ModelPicker`, the confirm/auto `Segmented`, the attach `IconButton` and send/stop

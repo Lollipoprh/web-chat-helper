@@ -1,12 +1,12 @@
-// 会话菜单内容：搜索框 + 会话列表 + 新建/重命名/清空/删除/任务记录。
+// 会话列表：搜索框 + 每一行「切过去 / 删除」。
 //
-// 从 App.tsx 里拆出来，一是因为搜索词属于「菜单自己」的临时状态，
-// 二是因为菜单结构后续还会长（分组、置顶），留在 App 里会继续膨胀。
+// 动作项（新建、重命名、删除当前会话）已经上移到标题栏，清空与任务记录入口移除
+// （清空仍可用 /clear，任务记录用右侧滑出按钮），菜单只负责切换与逐条删除。
 
 import { useMemo, useState } from 'react'
 import type { SessionRecord } from '../../shared/session-storage'
 import { useI18n } from '../../shared/useI18n'
-import { Input, MenuItem, MenuLabel, MenuSeparator, color, fontSize, space } from '../../ui'
+import { Icon, IconButton, Input, color, fontSize, radius, space } from '../../ui'
 
 /** 超过这个数量才显示搜索框，少量会话时保持菜单干净 */
 const SEARCH_THRESHOLD = 4
@@ -16,11 +16,7 @@ export interface SessionMenuProps {
   activeSessionId: string | null
   generating: boolean
   onSwitch: (sessionId: string) => void
-  onNew: () => void
-  onRename: () => void
-  onClear: () => void
-  onDelete: () => void
-  onShowTasks: () => void
+  onDelete: (sessionId: string) => void
   /** 关闭整个下拉菜单 */
   close: () => void
 }
@@ -30,11 +26,7 @@ export function SessionMenu({
   activeSessionId,
   generating,
   onSwitch,
-  onNew,
-  onRename,
-  onClear,
   onDelete,
-  onShowTasks,
   close,
 }: SessionMenuProps) {
   const { t } = useI18n()
@@ -54,7 +46,7 @@ export function SessionMenu({
   return (
     <>
       {sessions.length > SEARCH_THRESHOLD && (
-        <div style={{ padding: `0 ${space.xs}px ${space.xs}px` }}>
+        <div style={{ padding: space.xs }}>
           <Input
             type="search"
             size="sm"
@@ -66,10 +58,16 @@ export function SessionMenu({
         </div>
       )}
 
-      <MenuLabel>{t('sidepanel.sessionsTitle')}</MenuLabel>
-
       {sessions.length === 0 ? (
-        <MenuItem label={t('sidepanel.noSession')} disabled onSelect={() => undefined} />
+        <div
+          style={{
+            padding: `${space.sm}px ${space.md}px`,
+            color: color.textFaint,
+            fontSize: fontSize.sm,
+          }}
+        >
+          {t('sidepanel.noSession')}
+        </div>
       ) : filtered.length === 0 ? (
         <div
           style={{
@@ -81,56 +79,80 @@ export function SessionMenu({
           {t('sidepanel.sessionNoMatch')}
         </div>
       ) : (
-        // 会话多时只让列表滚动，下方动作项保持可见
         <div
           style={{
             display: 'flex',
             flexDirection: 'column',
-            maxHeight: 220,
+            maxHeight: 240,
             overflowY: 'auto',
+            gap: 1,
           }}
         >
-          {filtered.map((session) => (
-            <MenuItem
-              key={session.sessionId}
-              label={session.title || t('sidepanel.noSession')}
-              hint={session.messageCount}
-              selected={session.sessionId === activeSessionId}
-              disabled={generating}
-              onSelect={() => run(() => onSwitch(session.sessionId))}
-            />
-          ))}
+          {filtered.map((session) => {
+            const active = session.sessionId === activeSessionId
+            return (
+              <div
+                key={session.sessionId}
+                className="ui-session-row"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: space.xs,
+                  borderRadius: radius.sm,
+                  background: active ? color.primarySoft : 'transparent',
+                }}
+              >
+                <button
+                  type="button"
+                  disabled={generating}
+                  onClick={() => run(() => onSwitch(session.sessionId))}
+                  title={session.title}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: space.md,
+                    padding: '5px 4px 5px 8px',
+                    border: 'none',
+                    background: 'transparent',
+                    color: active ? color.primarySoftText : color.text,
+                    fontFamily: 'inherit',
+                    fontSize: fontSize.md,
+                    lineHeight: 1.4,
+                    textAlign: 'left',
+                    cursor: generating ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {session.title || t('sidepanel.noSession')}
+                  </span>
+                  <span style={{ flex: 'none', fontSize: fontSize.xs, color: color.textFaint }}>
+                    {session.messageCount}
+                  </span>
+                  {active && <Icon name="check" size={14} style={{ flex: 'none' }} />}
+                </button>
+                <IconButton
+                  icon="trash"
+                  size="xs"
+                  label={t('sidepanel.deleteSessionRow')}
+                  disabled={generating}
+                  onClick={() => run(() => onDelete(session.sessionId))}
+                  style={{ background: 'transparent', color: color.textFaint, marginRight: 2 }}
+                />
+              </div>
+            )
+          })}
         </div>
       )}
-
-      <MenuSeparator />
-      <MenuItem icon="plus" label={t('sidepanel.newSession')} disabled={generating} onSelect={() => run(onNew)} />
-      <MenuItem
-        icon="pencil"
-        label={t('sidepanel.renameSession')}
-        disabled={generating || !activeSessionId}
-        onSelect={() => run(onRename)}
-      />
-      <MenuItem
-        icon="eraser"
-        label={t('sidepanel.clearChatAction')}
-        disabled={generating || !activeSessionId}
-        onSelect={() => run(onClear)}
-      />
-      <MenuItem
-        icon="trash"
-        tone="danger"
-        label={t('sidepanel.deleteSessionAction')}
-        disabled={generating || !activeSessionId}
-        onSelect={() => run(onDelete)}
-      />
-      <MenuSeparator />
-      <MenuItem
-        icon="list"
-        label={t('sidepanel.tasks')}
-        disabled={!activeSessionId}
-        onSelect={() => run(onShowTasks)}
-      />
     </>
   )
 }

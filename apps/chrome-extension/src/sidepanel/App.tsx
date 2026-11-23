@@ -136,6 +136,9 @@ const TRANSLATE_REQUEST_TTL_MS = 60_000
 /** 输入框自动增高的上限：约 6 行，再多就在框内滚动 */
 const COMPOSER_MAX_HEIGHT = 132
 
+/** 标题栏里会话标题的最大宽度：超出后省略，给右侧图标留位置 */
+const TITLE_MAX_WIDTH = 156
+
 /**
  * System prompt (English) —— concise, scope-locked.
  * Covers identity ("Web Chat Helper"), positioning (browser-side AI agent),
@@ -495,48 +498,67 @@ export default function App() {
     }
   }, [generating, t])
 
-  const handleDeleteSession = useCallback(async () => {
-    if (generating || !activeSessionId) return
-    const confirmed = await confirm({
-      title: t('sidepanel.deleteDialogTitle'),
-      message: t('sidepanel.confirmDeleteSession'),
-      confirmLabel: t('sidepanel.deleteSession'),
-      confirmVariant: 'danger',
-    })
-    if (!confirmed) return
-
-    setHistoryLoaded(false)
-    try {
-      await Promise.all([
-        deleteSession(activeSessionId),
-        deleteSessionFiles(activeSessionId),
-        deleteTasksForSession(activeSessionId),
-      ])
-      const remaining = sessions.filter((session) => session.sessionId !== activeSessionId)
-      const next = remaining.length > 0 ? remaining[0] : await createSession()
-      setSessions(remaining.length > 0 ? remaining : [next])
-      setActiveSessionId(next.sessionId)
-      await saveActiveSessionId(next.sessionId)
-      const [stored, files] = await Promise.all([
-        loadSessionMessages(next.sessionId),
-        listBoundFiles(next.sessionId),
-      ])
-      setMessages(stored.map(toUiMessage))
-      setBoundFiles(files)
-      setTokenUsage({
-        inputTokens: next.inputTokens ?? 0,
-        outputTokens: next.outputTokens ?? 0,
+  /**
+   * 删除会话。不传 id 表示删当前会话：删完切到下一个，没有就新建一个。
+   * 传入别的 id（会话列表行上的删除）只删那一条，不动当前会话。
+   */
+  const handleDeleteSession = useCallback(
+    async (targetId?: string) => {
+      const sessionId = targetId ?? activeSessionId
+      if (generating || !sessionId) return
+      const target = sessions.find((session) => session.sessionId === sessionId)
+      const confirmed = await confirm({
+        title: t('sidepanel.deleteDialogTitle'),
+        message: target?.title
+          ? t('sidepanel.confirmDeleteSessionNamed', { title: target.title })
+          : t('sidepanel.confirmDeleteSession'),
+        confirmLabel: t('sidepanel.deleteSession'),
+        confirmVariant: 'danger',
       })
-      setContextTokens(recordedContextTokens(next))
-      setView('chat')
-      setBanner(null)
-    } catch (error) {
-      console.warn('[session] 删除会话失败', error)
-      setBanner(t('sidepanel.deleteSessionFailed'))
-    } finally {
-      setHistoryLoaded(true)
-    }
-  }, [generating, activeSessionId, sessions, t])
+      if (!confirmed) return
+
+      const deletingActive = sessionId === activeSessionId
+      if (deletingActive) setHistoryLoaded(false)
+      try {
+        await Promise.all([
+          deleteSession(sessionId),
+          deleteSessionFiles(sessionId),
+          deleteTasksForSession(sessionId),
+        ])
+
+        if (!deletingActive) {
+          await refreshSessions()
+          return
+        }
+
+        const remaining = sessions.filter((session) => session.sessionId !== sessionId)
+        const next = remaining.length > 0 ? remaining[0] : await createSession()
+        setSessions(remaining.length > 0 ? remaining : [next])
+        setActiveSessionId(next.sessionId)
+        await saveActiveSessionId(next.sessionId)
+        const [stored, files] = await Promise.all([
+          loadSessionMessages(next.sessionId),
+          listBoundFiles(next.sessionId),
+        ])
+        setMessages(stored.map(toUiMessage))
+        setBoundFiles(files)
+        setTokenUsage({
+          inputTokens: next.inputTokens ?? 0,
+          outputTokens: next.outputTokens ?? 0,
+        })
+        setContextTokens(recordedContextTokens(next))
+        void refreshSessionTasks(next.sessionId)
+        setView('chat')
+        setBanner(null)
+      } catch (error) {
+        console.warn('[session] 删除会话失败', error)
+        setBanner(t('sidepanel.deleteSessionFailed'))
+      } finally {
+        if (deletingActive) setHistoryLoaded(true)
+      }
+    },
+    [generating, activeSessionId, sessions, t, refreshSessions, refreshSessionTasks],
+  )
 
   const handleConfirmAction = useCallback(() => {
     confirmResolverRef.current?.(true)
@@ -1478,8 +1500,9 @@ export default function App() {
         <Dropdown
           triggerLabel={t('sidepanel.switchSession')}
           width={272}
+          panelRole="dialog"
           disabled={!historyLoaded}
-          triggerStyle={{ flex: 1, minWidth: 0 }}
+          triggerStyle={{ flex: '0 1 auto', minWidth: 0, maxWidth: TITLE_MAX_WIDTH, marginRight: 'auto' }}
           label={
             <>
               <span
@@ -1506,15 +1529,34 @@ export default function App() {
               activeSessionId={activeSessionId}
               generating={generating}
               onSwitch={(sessionId) => void handleSwitchSession(sessionId)}
-              onNew={() => void handleNewSession()}
-              onRename={() => setRenameDraft(activeSession?.title ?? '')}
-              onClear={() => void handleClear()}
-              onDelete={() => void handleDeleteSession()}
-              onShowTasks={() => setView('history')}
+              onDelete={(sessionId) => void handleDeleteSession(sessionId)}
               close={close}
             />
           )}
         </Dropdown>
+
+        {/* 重命名 / 新建 / 删除：从菜单提到标题右侧，菜单只留切换与逐条删除 */}
+        <IconButton
+          icon="pencil"
+          label={t('sidepanel.renameSession')}
+          size="sm"
+          disabled={generating || !activeSessionId}
+          onClick={() => setRenameDraft(activeSession?.title ?? '')}
+        />
+        <IconButton
+          icon="plus"
+          label={t('sidepanel.newSession')}
+          size="sm"
+          disabled={generating}
+          onClick={() => void handleNewSession()}
+        />
+        <IconButton
+          icon="trash"
+          label={t('sidepanel.deleteSessionAction')}
+          size="sm"
+          disabled={generating || !activeSessionId}
+          onClick={() => void handleDeleteSession()}
+        />
 
         {statusLabel && (
           <span
