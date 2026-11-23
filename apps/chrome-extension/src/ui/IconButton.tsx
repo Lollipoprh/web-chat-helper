@@ -19,6 +19,8 @@ export interface IconButtonProps
   variant?: Extract<ButtonVariant, 'text' | 'secondary' | 'danger' | 'subtle'>
   /** 处于选中/展开状态时提供视觉反馈 */
   active?: boolean
+  /** 悬浮提示方向；默认在上方，靠近页面顶部/底部的控件可改成下方 */
+  tooltipPlacement?: 'top' | 'bottom'
 }
 
 const BOX: Record<ControlSize, number> = { xs: 24, sm: 26, md: 30 }
@@ -29,6 +31,7 @@ export function IconButton({
   size = 'sm',
   variant = 'text',
   active = false,
+  tooltipPlacement = 'top',
   style,
   ...rest
 }: IconButtonProps) {
@@ -50,7 +53,7 @@ export function IconButton({
 
   return (
     // 悬浮提示统一走共享 Tooltip：与上下文条一致，且能跟随深浅色主题
-    <Tooltip content={label}>
+    <Tooltip content={label} placement={tooltipPlacement}>
       <Button
         {...rest}
         variant={variant}

@@ -110,6 +110,7 @@ export function MessageBubble({
             icon={copied ? 'check' : 'copy'}
             size="xs"
             label={copied ? t('message.copied') : t('message.copy')}
+            tooltipPlacement="bottom"
             onClick={() => void handleCopy()}
           />
           {isUser && onEdit && (
@@ -117,6 +118,7 @@ export function MessageBubble({
               icon="pencil"
               size="xs"
               label={t('message.edit')}
+              tooltipPlacement="bottom"
               onClick={() => onEdit(content)}
             />
           )}

@@ -62,13 +62,27 @@ export function Tooltip({
     const width = bubble.offsetWidth
     const height = bubble.offsetHeight
     const viewportWidth = document.documentElement.clientWidth
+    const viewportHeight = document.documentElement.clientHeight
 
     const centered = rect.left + rect.width / 2 - width / 2
     const maxLeft = Math.max(EDGE_GAP, viewportWidth - width - EDGE_GAP)
     const left = Math.min(Math.max(centered, EDGE_GAP), maxLeft)
-    const top = placement === 'top' ? rect.top - height - OFFSET : rect.bottom + OFFSET
 
-    setPosition({ left, top: Math.max(EDGE_GAP, top) })
+    // 首选方向放不下就翻到另一侧：宁可换边，也不要盖住触发元素本身
+    const need = height + OFFSET + EDGE_GAP
+    const spaceAbove = rect.top
+    const spaceBelow = viewportHeight - rect.bottom
+    let side: 'top' | 'bottom' = placement
+    if (placement === 'top' && spaceAbove < need && spaceBelow > spaceAbove) {
+      side = 'bottom'
+    } else if (placement === 'bottom' && spaceBelow < need && spaceAbove > spaceBelow) {
+      side = 'top'
+    }
+
+    const rawTop = side === 'top' ? rect.top - height - OFFSET : rect.bottom + OFFSET
+    const maxTop = Math.max(EDGE_GAP, viewportHeight - height - EDGE_GAP)
+
+    setPosition({ left, top: Math.min(Math.max(rawTop, EDGE_GAP), maxTop) })
   }, [placement])
 
   useLayoutEffect(() => {
