@@ -6,6 +6,7 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
 import { useI18n } from '../shared/useI18n'
 import { Icon } from './Icon'
+import { Tooltip } from './Tooltip'
 import { color, fontSize, fontWeight, radius, space } from './tokens'
 import { isSafeHref, parseInline, parseMarkdown, type Block, type InlineToken } from './markdown-parse'
 
@@ -214,27 +215,28 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
         <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {lang || 'code'}
         </span>
-        <button
-          type="button"
-          onClick={() => void copy()}
-          title={copied ? t('message.copied') : t('message.copy')}
-          aria-label={copied ? t('message.copied') : t('message.copy')}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 20,
-            height: 20,
-            padding: 0,
-            border: 'none',
-            borderRadius: radius.sm,
-            background: 'transparent',
-            color: copied ? color.success : color.textFaint,
-            cursor: 'pointer',
-          }}
-        >
-          <Icon name={copied ? 'check' : 'copy'} size={12} />
-        </button>
+        <Tooltip content={copied ? t('message.copied') : t('message.copy')}>
+          <button
+            type="button"
+            onClick={() => void copy()}
+            aria-label={copied ? t('message.copied') : t('message.copy')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 20,
+              height: 20,
+              padding: 0,
+              border: 'none',
+              borderRadius: radius.sm,
+              background: 'transparent',
+              color: copied ? color.success : color.textFaint,
+              cursor: 'pointer',
+            }}
+          >
+            <Icon name={copied ? 'check' : 'copy'} size={12} />
+          </button>
+        </Tooltip>
       </div>
       <pre
         style={{

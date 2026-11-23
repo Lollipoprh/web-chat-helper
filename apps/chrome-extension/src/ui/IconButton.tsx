@@ -7,6 +7,7 @@ import type { ButtonHTMLAttributes, CSSProperties } from 'react'
 import { Button, type ButtonVariant } from './Button'
 import { color, radius, type ControlSize } from './tokens'
 import { Icon, type IconName } from './Icon'
+import { Tooltip } from './Tooltip'
 
 export interface IconButtonProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'aria-label'> {
@@ -48,15 +49,17 @@ export function IconButton({
   }
 
   return (
-    <Button
-      {...rest}
-      variant={variant}
-      size={size}
-      title={label}
-      aria-label={label}
-      style={{ ...base, ...style }}
-    >
-      <Icon name={icon} size={iconPx} />
-    </Button>
+    // 悬浮提示统一走共享 Tooltip：与上下文条一致，且能跟随深浅色主题
+    <Tooltip content={label}>
+      <Button
+        {...rest}
+        variant={variant}
+        size={size}
+        aria-label={label}
+        style={{ ...base, ...style }}
+      >
+        <Icon name={icon} size={iconPx} />
+      </Button>
+    </Tooltip>
   )
 }

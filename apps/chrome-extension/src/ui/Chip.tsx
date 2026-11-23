@@ -2,10 +2,14 @@
 //
 // 与 Badge 的分工：Badge 只读、用于状态；Chip 可交互（点击/移除），
 // 所以有 hover、focus 与独立的移除按钮命中区。
+//
+// 悬浮提示统一用共享 Tooltip（与上下文条一致），只在文字部分挂提示，
+// 避免整块胶囊的提示与移除按钮的提示互相叠加。
 
 import type { CSSProperties, ReactNode } from 'react'
 import { color, fontSize, fontWeight, iconSize, radius, space } from './tokens'
 import { Icon, type IconName } from './Icon'
+import { Tooltip } from './Tooltip'
 import { cx } from './style'
 
 export type ChipTone = 'neutral' | 'primary' | 'danger' | 'warning'
@@ -78,10 +82,12 @@ export function Chip({
     </>
   )
 
+  // 有 title 时只给文字挂提示：图标与移除按钮各自有自己的提示
+  const body = title ? <Tooltip content={title}>{content}</Tooltip> : content
+
   return (
     <span
       className={cx('ui-chip', className)}
-      title={title}
       style={{
         ...base,
         ...(onClick ? { cursor: 'pointer' } : null),
@@ -92,7 +98,6 @@ export function Chip({
         <button
           type="button"
           onClick={onClick}
-          title={title}
           aria-label={title}
           className="ui-chip-action"
           style={{
@@ -108,38 +113,46 @@ export function Chip({
             cursor: 'pointer',
           }}
         >
-          {content}
+          {body}
         </button>
       ) : (
-        content
+        body
       )}
 
-      {onRemove && (
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label={removeLabel}
-          title={removeLabel}
-          className="ui-chip-remove"
+      {onRemove && removeLabel && (
+        // 负边距放在外层：命中区仍是 24×24，Tooltip 包装不参与尺寸计算
+        <span
           style={{
-            // 命中区做到 24×24（WCAG 2.5.8），用负边距抵消对胶囊高度的影响
-            width: 24,
-            height: 24,
-            margin: '-6px -6px -6px -2px',
-            padding: 0,
             display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: 'none',
-            borderRadius: radius.pill,
-            background: 'transparent',
-            color: 'inherit',
-            cursor: 'pointer',
-            opacity: 0.7,
+            flex: 'none',
+            margin: '-6px -6px -6px -2px',
           }}
         >
-          <Icon name="x" size={iconSize.xs} />
-        </button>
+          <Tooltip content={removeLabel}>
+            <button
+              type="button"
+              onClick={onRemove}
+              aria-label={removeLabel}
+              className="ui-chip-remove"
+              style={{
+                width: 24,
+                height: 24,
+                padding: 0,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: 'none',
+                borderRadius: radius.pill,
+                background: 'transparent',
+                color: 'inherit',
+                cursor: 'pointer',
+                opacity: 0.7,
+              }}
+            >
+              <Icon name="x" size={iconSize.xs} />
+            </button>
+          </Tooltip>
+        </span>
       )}
     </span>
   )

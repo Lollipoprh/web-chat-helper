@@ -5,8 +5,7 @@
 
 import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Button } from './Button'
-import { Icon } from './Icon'
+import { IconButton } from './IconButton'
 import { color, fontSize, fontWeight, radius, shadow, space, zIndex } from './tokens'
 
 const FOCUSABLE =
@@ -165,24 +164,13 @@ export function Dialog({
               </h2>
             )}
             {closeLabel && (
-              <Button
-                variant="text"
+              <IconButton
+                icon="x"
+                label={closeLabel}
                 size="xs"
                 onClick={onClose}
-                aria-label={closeLabel}
-                title={closeLabel}
-                style={{
-                  width: 24,
-                  height: 24,
-                  padding: 0,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: color.textMuted,
-                }}
-              >
-                <Icon name="x" size={14} />
-              </Button>
+                style={{ color: color.textMuted }}
+              />
             )}
           </div>
         )}

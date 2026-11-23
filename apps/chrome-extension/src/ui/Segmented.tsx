@@ -3,8 +3,9 @@
 // 用来替代 composer 里的原生 select：原生下拉在 400px 侧栏里既占宽度、
 // 又无法表达「当前是哪种模式」，而且展开的弹层不受主题控制。
 
-import type { CSSProperties } from 'react'
+import { Fragment, type CSSProperties } from 'react'
 import { color, fontSize, radius, shadow } from './tokens'
+import { Tooltip } from './Tooltip'
 import { cx } from './style'
 
 export interface SegmentedOption {
@@ -53,13 +54,11 @@ export function Segmented({
     >
       {options.map((option) => {
         const active = option.value === value
-        return (
+        const button = (
           <button
-            key={option.value}
             type="button"
             aria-pressed={active}
             disabled={disabled}
-            title={option.title}
             onClick={() => {
               if (!active) onChange(option.value)
             }}
@@ -79,6 +78,14 @@ export function Segmented({
           >
             {option.label}
           </button>
+        )
+
+        return option.title ? (
+          <Tooltip key={option.value} content={option.title}>
+            {button}
+          </Tooltip>
+        ) : (
+          <Fragment key={option.value}>{button}</Fragment>
         )
       })}
     </div>

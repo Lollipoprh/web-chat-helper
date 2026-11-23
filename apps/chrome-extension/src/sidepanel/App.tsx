@@ -105,6 +105,7 @@ import {
   LoadingRow,
   Segmented,
   TextArea,
+  Tooltip,
   color,
   fontSize,
   fontWeight,
@@ -2193,36 +2194,44 @@ function PullTab({
   onClick: () => void
 }) {
   return (
-    <button
-      type="button"
-      className="ui-pull-tab"
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      aria-label={label}
+    // 定位放在 Tooltip 外层，按钮自身保持静态，避免 absolute 相对错误容器定位
+    <Tooltip
+      content={label}
+      placement="bottom"
       style={{
         position: 'absolute',
         top: 100,
         right: 0,
         zIndex: zIndex.pullTab,
-        width: 24,
-        height: 60,
-        padding: 0,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderTop: `1px solid ${color.border}`,
-        borderBottom: `1px solid ${color.border}`,
-        borderLeft: `1px solid ${color.border}`,
-        borderRight: 'none',
-        borderRadius: `${radius.md}px 0 0 ${radius.md}px`,
-        background: color.surfaceMuted,
-        color: disabled ? color.textFaint : color.textMuted,
-        cursor: disabled ? 'not-allowed' : 'pointer',
+        display: 'block',
       }}
     >
-      <Icon name="chevron-left" size={14} />
-    </button>
+      <button
+        type="button"
+        className="ui-pull-tab"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+        style={{
+          width: 24,
+          height: 60,
+          padding: 0,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderTop: `1px solid ${color.border}`,
+          borderBottom: `1px solid ${color.border}`,
+          borderLeft: `1px solid ${color.border}`,
+          borderRight: 'none',
+          borderRadius: `${radius.md}px 0 0 ${radius.md}px`,
+          background: color.surfaceMuted,
+          color: disabled ? color.textFaint : color.textMuted,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+        }}
+      >
+        <Icon name="chevron-left" size={14} />
+      </button>
+    </Tooltip>
   )
 }
 

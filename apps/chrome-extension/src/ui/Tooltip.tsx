@@ -1,10 +1,13 @@
-// 通用悬浮框：鼠标悬浮或键盘聚焦时，在触发元素附近展示一块浮层。
+// 通用悬浮提示：鼠标悬浮或键盘聚焦时，在触发元素附近展示一条说明。
 //
-// 两种实现方式都用过，这里选 portal + fixed：
-// 1) 原先的 absolute 定位在侧栏里会被祖先的 overflow（例如上下文条的横向滚动）
-//    裁掉，浮层只露一条边；
-// 2) 浮层内容较宽时，靠近右边缘的触发元素会把文字顶出视口。
-// 因此浮层挂到 body 上，并根据触发元素的位置和自身尺寸做视口收窄。
+// 为什么不是原生 title：
+// 1. 原生提示由系统绘制，浅色/深色都无法跟随主题，和上下文条的提示风格不一致；
+// 2. 原生提示延迟约 1 秒且不能换行排版，长文案（完整会话名、模型说明）体验很差。
+//
+// 实现要点：
+// - 浮层 portal 到 body 并绝对定位于视口，因此不会被祖先的 overflow 裁剪；
+// - 打开时才挂载浮层，页面里有几十个图标按钮也不会产生几十个隐藏节点；
+// - 水平位置按自身宽度收窄到视口内，靠近右边缘的触发元素不会把文字顶出去。
 
 import {
   useCallback,
@@ -25,12 +28,13 @@ const EDGE_GAP = 8
 const OFFSET = 6
 
 export interface TooltipProps {
-  /** 悬浮框内容 */
+  /** 悬浮提示内容 */
   content: ReactNode
-  /** 触发悬浮框的元素 */
+  /** 触发悬浮提示的元素 */
   children: ReactNode
   /** 浮层相对触发元素的位置，默认上方 */
   placement?: 'top' | 'bottom'
+  /** 触发元素容器的额外样式（默认 inline-flex，便于放在按钮或文字旁） */
   style?: CSSProperties
   className?: string
 }
@@ -43,11 +47,12 @@ export function Tooltip({
   className,
 }: TooltipProps) {
   const [open, setOpen] = useState(false)
+  // 首次打开才挂载浮层：长列表里每个按钮都带提示时不至于堆一堆隐藏节点
+  const [mounted, setMounted] = useState(false)
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
-  const anchorRef = useRef<HTMLDivElement | null>(null)
+  const anchorRef = useRef<HTMLSpanElement | null>(null)
   const bubbleRef = useRef<HTMLDivElement | null>(null)
 
-  // 浮层常驻 DOM（只是不可见），这样打开前就能量到真实尺寸，避免先闪一下再归位
   const measure = useCallback(() => {
     const anchor = anchorRef.current
     const bubble = bubbleRef.current
@@ -67,12 +72,12 @@ export function Tooltip({
   }, [placement])
 
   useLayoutEffect(() => {
+    if (!open || !mounted) return
     measure()
-  }, [measure, content])
+  }, [open, mounted, measure, content])
 
   useEffect(() => {
     if (!open) return
-    measure()
     window.addEventListener('resize', measure)
     window.addEventListener('scroll', measure, true)
     return () => {
@@ -81,54 +86,59 @@ export function Tooltip({
     }
   }, [open, measure])
 
+  const show = () => {
+    setMounted(true)
+    setOpen(true)
+  }
+
   return (
     <>
-      <div
+      <span
         ref={anchorRef}
         className={className}
-        style={mergeStyle({ position: 'relative', display: 'block' }, style)}
-        onMouseEnter={() => setOpen(true)}
+        style={mergeStyle({ position: 'relative', display: 'inline-flex', maxWidth: '100%' }, style)}
+        onMouseEnter={show}
         onMouseLeave={() => setOpen(false)}
-        onFocus={() => setOpen(true)}
+        onFocus={show}
         onBlur={() => setOpen(false)}
       >
         {children}
-      </div>
+      </span>
 
-      {createPortal(
-        <div
-          ref={bubbleRef}
-          role="tooltip"
-          aria-hidden={!open}
-          style={{
-            position: 'fixed',
-            left: position?.left ?? 0,
-            top: position?.top ?? 0,
-            // 打开前保持不可见但仍参与布局，便于测量宽度
-            visibility: open && position ? 'visible' : 'hidden',
-            opacity: open ? 1 : 0,
-            width: 'max-content',
-            maxWidth: `min(260px, calc(100vw - ${EDGE_GAP * 2}px))`,
-            padding: '5px 9px',
-            borderRadius: radius.md,
-            background: color.tooltipSurface,
-            backdropFilter: 'blur(6px)',
-            color: color.textInverse,
-            fontSize: fontSize.xs,
-            lineHeight: 1.5,
-            textAlign: 'center',
-            whiteSpace: 'normal',
-            boxShadow: shadow.md,
-            transition: 'opacity 120ms ease',
-            pointerEvents: 'none',
-            zIndex: zIndex.tooltip,
-            boxSizing: 'border-box',
-          }}
-        >
-          {content}
-        </div>,
-        document.body,
-      )}
+      {mounted &&
+        createPortal(
+          <div
+            ref={bubbleRef}
+            role="tooltip"
+            aria-hidden={!open}
+            style={{
+              position: 'fixed',
+              left: position?.left ?? 0,
+              top: position?.top ?? 0,
+              visibility: open && position ? 'visible' : 'hidden',
+              opacity: open ? 1 : 0,
+              width: 'max-content',
+              maxWidth: `min(260px, calc(100vw - ${EDGE_GAP * 2}px))`,
+              padding: '5px 9px',
+              borderRadius: radius.md,
+              background: color.tooltipSurface,
+              backdropFilter: 'blur(6px)',
+              color: color.textInverse,
+              fontSize: fontSize.xs,
+              lineHeight: 1.5,
+              textAlign: 'center',
+              whiteSpace: 'normal',
+              boxShadow: shadow.md,
+              transition: 'opacity 120ms ease',
+              pointerEvents: 'none',
+              zIndex: zIndex.tooltip,
+              boxSizing: 'border-box',
+            }}
+          >
+            {content}
+          </div>,
+          document.body,
+        )}
     </>
   )
 }

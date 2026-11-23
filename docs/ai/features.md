@@ -77,7 +77,8 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 
 - Design tokens (numeric scales: radius, font size/weight, spacing, control size, shadow, motion, z-index, icon size): `apps/chrome-extension/src/ui/tokens.ts`
 - Color tokens are CSS variables, not literals: `apps/chrome-extension/src/ui/theme.css` (`--wc-*`) — light/dark via `light-dark()`, plus `:focus-visible` ring, `.ui-button` hover/active states, spinner and skeleton keyframes. `tokens.ts` only references `var(--wc-*)`, so every component is theme-aware without changes
-- Shared primitives: `apps/chrome-extension/src/ui/` — Button, IconButton, Icon, Input, TextArea, Select, Checkbox, Field, Alert, Card, Badge, Tooltip, Spinner/LoadingRow, Skeleton/SkeletonLines, EmptyState, Dialog, Dropdown/MenuItem, Segmented, Chip
+- Shared primitives: `apps/chrome-extension/src/ui/` — Button, IconButton, Icon, Input, TextArea, Select, Checkbox, Field, Alert, Card, Badge, Tooltip, Spinner/LoadingRow, Skeleton/SkeletonLines, EmptyState, Dialog, Dropdown/MenuItem, Segmented, Chip, Markdown
+- Hover hints all go through the shared `Tooltip` (`apps/chrome-extension/src/ui/Tooltip.tsx`), never the native `title`: it portals to the body, mounts only on first open, clamps itself to the viewport, and keeps `aria-label` on the control as the accessible name
 - Component prop conventions and override rules: `apps/chrome-extension/src/ui/index.ts`
 - Settings-page layout styles: `apps/chrome-extension/src/options/styles.ts`
 

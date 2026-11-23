@@ -6,7 +6,7 @@
 import { useMemo, useState } from 'react'
 import type { SessionRecord } from '../../shared/session-storage'
 import { useI18n } from '../../shared/useI18n'
-import { Icon, IconButton, Input, color, fontSize, radius, space } from '../../ui'
+import { Icon, IconButton, Input, Tooltip, color, fontSize, radius, space } from '../../ui'
 
 /** 超过这个数量才显示搜索框，少量会话时保持菜单干净 */
 const SEARCH_THRESHOLD = 4
@@ -106,7 +106,6 @@ export function SessionMenu({
                   type="button"
                   disabled={generating}
                   onClick={() => run(() => onSwitch(session.sessionId))}
-                  title={session.title}
                   style={{
                     flex: 1,
                     minWidth: 0,
@@ -124,17 +123,21 @@ export function SessionMenu({
                     cursor: generating ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  <span
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
+                  <Tooltip
+                    content={session.title || t('sidepanel.noSession')}
+                    style={{ flex: 1, minWidth: 0, display: 'block' }}
                   >
-                    {session.title || t('sidepanel.noSession')}
-                  </span>
+                    <span
+                      style={{
+                        display: 'block',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {session.title || t('sidepanel.noSession')}
+                    </span>
+                  </Tooltip>
                   <span style={{ flex: 'none', fontSize: fontSize.xs, color: color.textFaint }}>
                     {session.messageCount}
                   </span>

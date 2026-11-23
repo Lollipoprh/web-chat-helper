@@ -16,6 +16,7 @@ import {
   EmptyState,
   LoadingRow,
   SkeletonLines,
+  Tooltip,
   color,
   fontSize,
   radius,
@@ -114,21 +115,24 @@ export default function TaskHistory({ sessionId, sessionTitle }: TaskHistoryProp
           marginBottom: 4,
         }}
       >
-        <div
-          title={sessionTitle}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            color: color.textSecondary,
-          }}
+        <Tooltip
+          content={sessionTitle?.trim() ? sessionTitle : t('sidepanel.noSession')}
+          style={{ flex: 1, minWidth: 0, display: 'block' }}
         >
-          {t('history.sessionLabel', {
-            title: sessionTitle?.trim() ? sessionTitle : t('sidepanel.noSession'),
-          })}
-        </div>
+          <span
+            style={{
+              display: 'block',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              color: color.textSecondary,
+            }}
+          >
+            {t('history.sessionLabel', {
+              title: sessionTitle?.trim() ? sessionTitle : t('sidepanel.noSession'),
+            })}
+          </span>
+        </Tooltip>
         <Button
           size="xs"
           variant="secondary"
@@ -188,18 +192,18 @@ export default function TaskHistory({ sessionId, sessionTitle }: TaskHistoryProp
               </div>
               <div style={{ color: color.text, wordBreak: 'break-word' }}>{task.goal}</div>
               {task.tabUrl && (
-                <div
-                  style={{
-                    color: color.textFaint,
-                    marginTop: 2,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                  title={task.tabUrl}
-                >
-                  {task.tabUrl}
-                </div>
+                <Tooltip content={task.tabUrl} style={{ display: 'block', marginTop: 2 }}>
+                  <div
+                    style={{
+                      color: color.textFaint,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {task.tabUrl}
+                  </div>
+                </Tooltip>
               )}
               {task.stopReason && task.stopReason !== 'completed' && (
                 <div style={{ color: color.textFaint, marginTop: 2 }}>

@@ -14,6 +14,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon, type IconName } from './Icon'
+import { Tooltip } from './Tooltip'
 import { color, fontSize, fontWeight, radius, shadow, space, zIndex } from './tokens'
 import { cx } from './style'
 
@@ -124,32 +125,35 @@ export function Dropdown({
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        className={cx('ui-dropdown-trigger', className)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={triggerLabel}
-        title={triggerLabel}
-        disabled={disabled}
-        onClick={() => setOpen((value) => !value)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: space.xs,
-          minWidth: 0,
-          padding: 0,
-          border: 'none',
-          background: 'transparent',
-          color: 'inherit',
-          fontFamily: 'inherit',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          ...triggerStyle,
-        }}
-      >
-        {label}
-      </button>
+      {/* 触发按钮外包一层 Tooltip：提示样式与上下文条统一，且 triggerStyle 的
+          flex/maxWidth 要落在外层，按钮自己撑满宽度才能正确省略 */}
+      <Tooltip content={triggerLabel} style={triggerStyle}>
+        <button
+          ref={triggerRef}
+          type="button"
+          className={cx('ui-dropdown-trigger', className)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label={triggerLabel}
+          disabled={disabled}
+          onClick={() => setOpen((value) => !value)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: space.xs,
+            width: '100%',
+            minWidth: 0,
+            padding: 0,
+            border: 'none',
+            background: 'transparent',
+            color: 'inherit',
+            fontFamily: 'inherit',
+            cursor: disabled ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {label}
+        </button>
+      </Tooltip>
 
       {open &&
         pos &&

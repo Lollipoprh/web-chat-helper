@@ -8,7 +8,7 @@ import {
 import { createPortal } from 'react-dom'
 import type { ProviderConfig } from 'llm-client'
 import { useI18n } from '../../shared/useI18n'
-import { Icon, color, fontSize, radius, shadow, space } from '../../ui'
+import { Icon, Tooltip, color, fontSize, radius, shadow, space } from '../../ui'
 
 interface ModelGroup {
   providerName: string
@@ -160,41 +160,46 @@ export function ModelPicker({
 
   return (
     <div style={{ flex: '0 1 33%', minWidth: 0, ...style }}>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={toggle}
-        disabled={disabled}
-        title={
+      <Tooltip
+        content={
           selected
             ? [selected.name, selected.model, streamingLabel].filter(Boolean).join(' · ')
             : t('picker.switchModel')
         }
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        style={{
-          ...TRIGGER_STYLE,
-          color: disabled ? color.textFaint : color.textSecondary,
-          cursor: disabled ? 'not-allowed' : 'pointer',
-        }}
+        placement="bottom"
+        style={{ display: 'block', width: '100%' }}
       >
-        <span
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={toggle}
+          disabled={disabled}
+          aria-haspopup="listbox"
+          aria-expanded={open}
           style={{
-            flex: '1 1 auto',
-            minWidth: 0,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
+            ...TRIGGER_STYLE,
+            color: disabled ? color.textFaint : color.textSecondary,
+            cursor: disabled ? 'not-allowed' : 'pointer',
           }}
         >
-          {selected?.model ?? t('picker.selectModel')}
-        </span>
-        <Icon
-          name="chevron-down"
-          size={12}
-          style={{ color: color.textFaint, marginLeft: space.xs }}
-        />
-      </button>
+          <span
+            style={{
+              flex: '1 1 auto',
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {selected?.model ?? t('picker.selectModel')}
+          </span>
+          <Icon
+            name="chevron-down"
+            size={12}
+            style={{ color: color.textFaint, marginLeft: space.xs }}
+          />
+        </button>
+      </Tooltip>
 
       {panelStyle &&
         createPortal(
