@@ -45,7 +45,9 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 ## Side panel UI and chat interaction
 
 - Main UI: `apps/chrome-extension/src/sidepanel/App.tsx`
-- Header (HUD): brand mark + session title that opens the session `Dropdown` menu (switch / new / clear / delete / task history), a status pill (`sidepanel.statusRunning` / `statusAwaiting`, only while active) and the settings `IconButton`
+- Header (HUD): brand mark + session title that opens the session `Dropdown` menu, a status pill (`sidepanel.statusRunning` / `statusAwaiting`, only while active) and the settings `IconButton`
+- Session menu content: `apps/chrome-extension/src/sidepanel/components/SessionMenu.tsx` — search box (shown once there are more than four sessions), session list, then new / rename / clear / delete / task records
+- Session rename: `renameSession` in `apps/chrome-extension/src/shared/session-storage.ts` (deliberately leaves `updatedAt` alone so renaming does not reorder the list), driven by `renameDraft` state in `App.tsx` through the shared `Dialog` + `Input`
 - Session actions live in the header menu, not in a toolbar row — `apps/chrome-extension/src/ui/Menu.tsx` (`Dropdown`, `MenuItem`)
 - Composer: one-line `TextArea` that grows to `COMPOSER_MAX_HEIGHT`, then a control row with `ModelPicker`, the confirm/auto `Segmented`, the attach `IconButton` and send/stop
 - Context strip under the composer: current-page chip (turns `danger` and grants permission on click when `pendingPageOrigin` matches the tab), one removable chip per bound file, and the compact `UsageMeter`

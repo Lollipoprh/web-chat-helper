@@ -35,6 +35,7 @@ import {
   getSession,
   listSessions,
   loadSessionMessages,
+  renameSession,
   saveSessionContextTokens,
   saveSessionDigest,
   setActiveSessionId as saveActiveSessionId,
@@ -82,6 +83,7 @@ import TaskHistory from './TaskHistory'
 import { MessageBubble, type MessageStatus } from './components/MessageBubble'
 import { ModelPicker } from './components/ModelPicker'
 import { RunBlock } from './components/RunBlock'
+import { SessionMenu } from './components/SessionMenu'
 import { UsageMeter } from './components/UsageMeter'
 import { loadSessionMemory } from './memory-assembly'
 import {
@@ -94,14 +96,13 @@ import {
   Alert,
   Button,
   Chip,
+  Dialog,
   Dropdown,
   EmptyState,
   Icon,
   IconButton,
+  Input,
   LoadingRow,
-  MenuItem,
-  MenuLabel,
-  MenuSeparator,
   Segmented,
   TextArea,
   color,
@@ -211,6 +212,8 @@ export default function App() {
   } | null>(null)
   // 当前会话的任务摘要（taskId → 记录），给运行块提供步数与耗时
   const [sessionTasks, setSessionTasks] = useState<Record<string, LogTaskRecord>>({})
+  // 重命名会话的草稿；非 null 表示对话框打开
+  const [renameDraft, setRenameDraft] = useState<string | null>(null)
   // 文件管理：当前会话绑定的本地文件列表
   const [boundFiles, setBoundFiles] = useState<BoundFileMeta[]>([])
   // 当前会话累计 token 用量，用于标题栏下方的用量条
@@ -557,6 +560,21 @@ export default function App() {
     setInput(text)
     composerRef.current?.focus()
   }, [])
+
+  /** 保存会话重命名：空标题直接忽略，失败时提示并保留对话框 */
+  const handleRenameSubmit = useCallback(async () => {
+    if (!activeSessionId || renameDraft === null) return
+    const title = renameDraft.trim()
+    if (!title) return
+    try {
+      await renameSession(activeSessionId, title)
+      setRenameDraft(null)
+      await refreshSessions()
+    } catch (error) {
+      console.warn('[session] 重命名失败', error)
+      setBanner(t('sidepanel.renameFailed'))
+    }
+  }, [activeSessionId, renameDraft, refreshSessions, t])
 
   /**
    * 全局豁免开关切换：
@@ -1483,79 +1501,18 @@ export default function App() {
           }
         >
           {(close) => (
-            <>
-              <MenuLabel>{t('sidepanel.sessionsTitle')}</MenuLabel>
-              {sessions.length === 0 ? (
-                <MenuItem
-                  label={t('sidepanel.noSession')}
-                  disabled
-                  onSelect={() => undefined}
-                />
-              ) : (
-                // 会话多时只让列表滚动，下方的新建/清空/删除与任务记录保持可见
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    maxHeight: 220,
-                    overflowY: 'auto',
-                  }}
-                >
-                  {sessions.map((session) => (
-                    <MenuItem
-                      key={session.sessionId}
-                      label={session.title || t('sidepanel.noSession')}
-                      hint={session.messageCount}
-                      selected={session.sessionId === activeSessionId}
-                      disabled={generating}
-                      onSelect={() => {
-                        close()
-                        void handleSwitchSession(session.sessionId)
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-              <MenuSeparator />
-              <MenuItem
-                icon="plus"
-                label={t('sidepanel.newSession')}
-                disabled={generating}
-                onSelect={() => {
-                  close()
-                  void handleNewSession()
-                }}
-              />
-              <MenuItem
-                icon="eraser"
-                label={t('sidepanel.clearChatAction')}
-                disabled={generating || !activeSessionId}
-                onSelect={() => {
-                  close()
-                  void handleClear()
-                }}
-              />
-              <MenuItem
-                icon="trash"
-                tone="danger"
-                label={t('sidepanel.deleteSessionAction')}
-                disabled={generating || !activeSessionId}
-                onSelect={() => {
-                  close()
-                  void handleDeleteSession()
-                }}
-              />
-              <MenuSeparator />
-              <MenuItem
-                icon="list"
-                label={t('sidepanel.tasks')}
-                disabled={!activeSessionId}
-                onSelect={() => {
-                  close()
-                  setView('history')
-                }}
-              />
-            </>
+            <SessionMenu
+              sessions={sessions}
+              activeSessionId={activeSessionId}
+              generating={generating}
+              onSwitch={(sessionId) => void handleSwitchSession(sessionId)}
+              onNew={() => void handleNewSession()}
+              onRename={() => setRenameDraft(activeSession?.title ?? '')}
+              onClear={() => void handleClear()}
+              onDelete={() => void handleDeleteSession()}
+              onShowTasks={() => setView('history')}
+              close={close}
+            />
           )}
         </Dropdown>
 
@@ -2140,6 +2097,42 @@ export default function App() {
           </div>
         </aside>
       </div>
+
+      {/* 重命名会话：只有标题一个输入，回车即保存 */}
+      <Dialog
+        open={renameDraft !== null}
+        title={t('sidepanel.renameTitle')}
+        closeLabel={t('common.close')}
+        onClose={() => setRenameDraft(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRenameDraft(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!renameDraft?.trim()}
+              onClick={() => void handleRenameSubmit()}
+            >
+              {t('common.save')}
+            </Button>
+          </>
+        }
+      >
+        <Input
+          autoFocus
+          value={renameDraft ?? ''}
+          maxLength={60}
+          placeholder={t('sidepanel.renamePlaceholder')}
+          aria-label={t('sidepanel.renameTitle')}
+          onChange={(event) => setRenameDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') return
+            event.preventDefault()
+            void handleRenameSubmit()
+          }}
+        />
+      </Dialog>
     </div>
   )
 }

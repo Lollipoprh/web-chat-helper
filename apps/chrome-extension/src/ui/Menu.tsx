@@ -74,11 +74,12 @@ export function Dropdown({
     })
   }, [open, align, width])
 
-  // 打开后把焦点移到第一项，键盘用户可以直接回车选择
+  // 打开后把焦点移到第一项，键盘用户可以直接回车选择；
+  // 菜单里带搜索框时优先聚焦输入框，打开即可输入
   useEffect(() => {
     if (!open || !pos) return
     const first = panelRef.current?.querySelector<HTMLElement>(
-      '[role="menuitem"]:not([disabled])',
+      'input, [role="menuitem"]:not([disabled])',
     )
     first?.focus()
   }, [open, pos])

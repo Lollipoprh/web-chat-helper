@@ -216,6 +216,23 @@ export async function getSession(sessionId: string): Promise<SessionRecord | nul
 }
 
 /**
+ * 重命名会话。
+ * 刻意不动 updatedAt：改名是元数据操作，不应该把这个会话顶到列表最前面。
+ */
+export async function renameSession(sessionId: string, title: string): Promise<void> {
+  const trimmed = title.trim()
+  if (!trimmed) return
+  const db = await openLocalDb()
+  const tx = db.transaction(SESSION_STORE, 'readwrite')
+  const store = tx.objectStore(SESSION_STORE)
+  const existing = await requestResult<SessionRecord | undefined>(
+    store.get(sessionId) as IDBRequest<SessionRecord | undefined>,
+  )
+  if (existing) store.put({ ...existing, title: trimmed })
+  await txDone(tx)
+}
+
+/**
  * 写入会话摘要（/compact 的结果）。
  * 只影响请求装配，不删除任何界面消息。
  */
