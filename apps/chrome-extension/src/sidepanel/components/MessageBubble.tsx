@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useI18n } from '../../shared/useI18n'
-import { IconButton, color, fontSize, radius, space } from '../../ui'
+import { IconButton, Markdown, color, fontSize, radius, space } from '../../ui'
 
 export type MessageStatus = 'complete' | 'streaming' | 'error' | 'cancelled'
 
@@ -51,12 +51,21 @@ export function MessageBubble({
     borderRadius: radius.lg,
     fontSize: fontSize.md,
     lineHeight: 1.65,
-    whiteSpace: 'pre-wrap',
+    // 助手回复走 Markdown 渲染，块级元素自己控制换行；用户原文保留换行
+    whiteSpace: isUser ? 'pre-wrap' : 'normal',
     wordBreak: 'break-word',
     background: isUser ? color.primary : isError ? color.dangerSoft : color.surfaceSubtle,
     color: isUser ? color.textInverse : color.text,
     border: isError ? `1px solid ${color.dangerBorder}` : 'none',
   }
+
+  const streamingCaret =
+    status === 'streaming' && content ? (
+      <span aria-hidden="true" style={{ color: color.textFaint }}>
+        {' '}
+        ▍
+      </span>
+    ) : null
 
   return (
     <div
@@ -75,16 +84,9 @@ export function MessageBubble({
         aria-live={status === 'streaming' ? 'polite' : undefined}
         aria-busy={status === 'streaming' ? true : undefined}
       >
-        {content}
+        {isUser ? content : <Markdown source={content} trailing={streamingCaret} />}
         {status === 'streaming' &&
-          (content ? (
-            <span aria-hidden="true" style={{ color: color.textFaint }}>
-              {' '}
-              ▍
-            </span>
-          ) : (
-            <span style={{ color: color.textFaint }}>{t('message.generating')}</span>
-          ))}
+          !content && <span style={{ color: color.textFaint }}>{t('message.generating')}</span>}
         {status === 'cancelled' && (
           <span style={{ color: color.textFaint, fontSize: fontSize.xs }}>
             {t('message.cancelled')}

@@ -203,7 +203,7 @@ used by: `apps/chrome-extension/src/background/index.ts`, `apps/chrome-extension
 - :85 — `useI18n`
 - :103 — `langDisplayName`
 imports: `apps/chrome-extension/src/shared/i18n.ts`
-used by: `apps/chrome-extension/src/options/App.tsx`, `apps/chrome-extension/src/options/ProviderForm.tsx`, `apps/chrome-extension/src/shared/confirm.tsx`, `apps/chrome-extension/src/sidepanel/App.tsx`, `apps/chrome-extension/src/sidepanel/TaskHistory.tsx`, `apps/chrome-extension/src/sidepanel/components/MessageBubble.tsx`, `apps/chrome-extension/src/sidepanel/components/ModelPicker.tsx`, `apps/chrome-extension/src/sidepanel/components/RunBlock.tsx`, `apps/chrome-extension/src/sidepanel/components/ToolEventItem.tsx`, `apps/chrome-extension/src/sidepanel/components/UsageMeter.tsx`
+used by: `apps/chrome-extension/src/options/App.tsx`, `apps/chrome-extension/src/options/ProviderForm.tsx`, `apps/chrome-extension/src/shared/confirm.tsx`, `apps/chrome-extension/src/sidepanel/App.tsx`, `apps/chrome-extension/src/sidepanel/TaskHistory.tsx`, `apps/chrome-extension/src/sidepanel/components/MessageBubble.tsx`, `apps/chrome-extension/src/sidepanel/components/ModelPicker.tsx`, `apps/chrome-extension/src/sidepanel/components/RunBlock.tsx`, `apps/chrome-extension/src/sidepanel/components/ToolEventItem.tsx`, `apps/chrome-extension/src/sidepanel/components/UsageMeter.tsx`, `apps/chrome-extension/src/ui/Markdown.tsx`
 
 ## src/shared/useTheme.ts (103 lines)
 - :22 — `Theme`

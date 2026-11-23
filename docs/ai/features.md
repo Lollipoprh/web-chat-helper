@@ -58,7 +58,8 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 - Run block (one per assistant reply): `apps/chrome-extension/src/sidepanel/components/RunBlock.tsx` — collapsed shows status · step count · duration; expanding shows the step timeline. Uses live `toolEvents` while streaming and `listTaskSteps(taskId)` afterwards
 - Reply-to-task link: `SessionMessageRecord.taskId` (`apps/chrome-extension/src/shared/session-storage.ts`) is written with the assistant message so the run block survives a reload; older records simply render without one
 - Task summaries for run blocks (step count / duration) are cached per session in `App.tsx` (`refreshSessionTasks` ← `listSessionTasks`)
-- Message bubble and message actions (copy / edit-and-resend): `apps/chrome-extension/src/sidepanel/components/MessageBubble.tsx` — actions appear on hover or keyboard focus
+- Message bubble and message actions (copy / edit-and-resend): `apps/chrome-extension/src/sidepanel/components/MessageBubble.tsx` — assistant text renders through Markdown, user text stays plain with preserved newlines; actions appear on hover or keyboard focus
+- Markdown rendering: `apps/chrome-extension/src/ui/Markdown.tsx` (blocks + inline, fenced code with language label and copy, lists, quotes, rules, tables) on top of the pure parser in `apps/chrome-extension/src/ui/markdown-parse.ts`, unit-tested in `apps/chrome-extension/src/ui/markdown-parse.test.ts`. Rendering builds React elements only — never `innerHTML` — and links are limited to `http(s)` / `mailto`
 - Step row (used inside the run block): `apps/chrome-extension/src/sidepanel/components/ToolEventItem.tsx`
 
 ## Interface language (zh / en)
