@@ -56,6 +56,11 @@ const zh = {
   'palette.rename': '重命名当前会话',
   'palette.hint': '{shortcut} 打开命令面板',
 
+  'artifact.title': '产物',
+  'artifact.count': '{count} 个',
+  'artifact.show': '显示',
+  'artifact.hint': '文件保存在系统下载目录，这里只记录文件名。',
+
   'file.previewTitle': '文件预览：{name}',
   'file.previewBinary': '该文件不是纯文本，暂不支持预览。',
   'file.previewFailed': '读取失败，可能是文件访问权限已失效，请重新绑定。',
@@ -342,6 +347,11 @@ const en: Record<MessageKey, string> = {
   'palette.newSession': 'New session',
   'palette.rename': 'Rename this session',
   'palette.hint': '{shortcut} for the command palette',
+
+  'artifact.title': 'Artifacts',
+  'artifact.count': '{count}',
+  'artifact.show': 'Show',
+  'artifact.hint': 'Files stay in your Downloads folder; only their names are recorded here.',
 
   'file.previewTitle': 'Preview: {name}',
   'file.previewBinary': 'This file is not plain text, so it cannot be previewed.',

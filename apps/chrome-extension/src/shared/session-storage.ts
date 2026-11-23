@@ -42,7 +42,27 @@ export interface SessionRecord {
   digestThroughMessageId?: string
   /** 当前上下文的估算 token 占用；/compact 后立即下降，用于进度条 */
   contextTokens?: number
+  /** 本会话产出的文件（只存元数据，最新的在后面） */
+  artifacts?: SessionArtifact[]
 }
+
+/**
+ * 会话产物的描述信息。
+ * 只存文件名、大小、下载任务 id 与时间，**不存内容**：
+ * 文件本体已经在系统下载目录里，重复保存只会白占存储。
+ */
+export interface SessionArtifact {
+  /** 相对下载目录的路径，例如 notes/todo.md */
+  name: string
+  /** chrome.downloads 的任务 id，用于「在文件夹中显示」 */
+  downloadId?: number
+  /** 写入的字节数 */
+  bytes?: number
+  createdAt: number
+}
+
+/** 每个会话最多保留的产物条数：只存元数据，但仍要防止无限增长 */
+const ARTIFACT_LIMIT = 50
 
 export interface SessionMessageRecord {
   id: string
@@ -171,6 +191,34 @@ export async function deleteSessionMessage(
       messageCount: Math.max(0, session.messageCount - 1),
     })
   }
+  await txDone(tx)
+}
+
+/**
+ * 追加一条会话产物（只存元数据）。
+ * 不动 updatedAt：产物是某轮任务的副产品，不该把会话顶到列表最前。
+ * 同名产物保留最后一条，避免「覆盖保存」时列表里堆一串同名文件。
+ */
+export async function appendSessionArtifact(
+  sessionId: string,
+  artifact: SessionArtifact,
+): Promise<void> {
+  const db = await openLocalDb()
+  const tx = db.transaction(SESSION_STORE, 'readwrite')
+  const store = tx.objectStore(SESSION_STORE)
+  const session = await requestResult<SessionRecord | undefined>(
+    store.get(sessionId) as IDBRequest<SessionRecord | undefined>,
+  )
+  if (!session) {
+    await txDone(tx)
+    return
+  }
+
+  const previous = (session.artifacts ?? []).filter((item) => item.name !== artifact.name)
+  store.put({
+    ...session,
+    artifacts: [...previous, artifact].slice(-ARTIFACT_LIMIT),
+  })
   await txDone(tx)
 }
 

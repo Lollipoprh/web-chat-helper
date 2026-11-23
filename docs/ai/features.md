@@ -118,6 +118,8 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 - File tools: `apps/chrome-extension/src/sidepanel/file-tools.ts` (`createFileTools(sessionId)`) — `list_bound_files` and every read/write are limited to files bound to the current session
 - Side Panel UI: bound files are chips in the context strip under the composer (hidden when none), and the attach icon opens the system picker directly; dropping files onto the chat panel or composer binds them to the current session through `DataTransferItem.getAsFileSystemHandle()`
 - File preview (first slice of the artifacts surface): `apps/chrome-extension/src/sidepanel/components/FilePreview.tsx` — clicking a file chip reads the bound handle, shows the first 200 lines / 12k characters in a dialog, and reports binary files or a revoked permission instead of failing silently
+- Session artifacts: `download_file` calls `appendSessionArtifact` (`apps/chrome-extension/src/shared/session-storage.ts`), so `SessionRecord.artifacts` keeps **metadata only** — name, byte count, `chrome.downloads` id and time, capped at 50 and de-duplicated by name. File content is never copied into IndexedDB; the file itself stays in the Downloads folder, which is what keeps history from growing with every export
+- Artifact list: `apps/chrome-extension/src/sidepanel/components/ArtifactList.tsx` — shown above the task records (both the wide right column and the slide-over) with a `显示` action that calls `chrome.downloads.show`, falling back to the Downloads folder when that download is gone
 - Display formatting shared by the panel and dialogs: `apps/chrome-extension/src/shared/format.ts` (`formatFileSize`, `formatDateTime`)
 
 ## Provider configuration: model, key, and URL

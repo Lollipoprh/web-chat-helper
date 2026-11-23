@@ -82,6 +82,7 @@ import {
   setDefaultProvider,
 } from '../shared/storage'
 import TaskHistory from './TaskHistory'
+import { ArtifactList } from './components/ArtifactList'
 import { CommandPalette, type PaletteAction } from './components/CommandPalette'
 import { FilePreview } from './components/FilePreview'
 import { MessageBubble, type MessageStatus } from './components/MessageBubble'
@@ -2414,12 +2415,15 @@ export default function App() {
               }}
             >
               {activeSessionId ? (
-                <TaskHistory
-                  sessionId={activeSessionId}
-                  sessionTitle={activeSession?.title}
-                  locatableTaskIds={locatableTaskIds}
-                  onLocate={handleLocateRun}
-                />
+                <>
+                  <ArtifactList artifacts={activeSession?.artifacts ?? []} />
+                  <TaskHistory
+                    sessionId={activeSessionId}
+                    sessionTitle={activeSession?.title}
+                    locatableTaskIds={locatableTaskIds}
+                    onLocate={handleLocateRun}
+                  />
+                </>
               ) : (
                 <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
                   {t('sidepanel.noSession')}
