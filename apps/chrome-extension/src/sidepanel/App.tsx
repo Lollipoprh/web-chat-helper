@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type DragEvent,
@@ -175,7 +176,7 @@ interface UiMessage {
 }
 
 export default function App() {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   // 侧边栏只需要主题生效，不展示偏好值；系统主题变化由 CSS 的 light-dark() 处理
   useApplyTheme()
   // 初始化 effect 只在挂载时跑一次：里面用到的 t 走 ref，避免切换语言时重跑并覆盖正在进行的会话
@@ -218,6 +219,8 @@ export default function App() {
   const [sessionTasks, setSessionTasks] = useState<Record<string, LogTaskRecord>>({})
   // 重命名会话的草稿；非 null 表示对话框打开
   const [renameDraft, setRenameDraft] = useState<string | null>(null)
+  // 刚从任务记录定位过来的运行：短暂高亮对应消息
+  const [focusedRunId, setFocusedRunId] = useState<string | null>(null)
   // 文件管理：当前会话绑定的本地文件列表
   const [boundFiles, setBoundFiles] = useState<BoundFileMeta[]>([])
   // 当前会话累计 token 用量，用于标题栏下方的用量条
@@ -582,6 +585,19 @@ export default function App() {
   const handleEditMessage = useCallback((text: string) => {
     setInput(text)
     composerRef.current?.focus()
+  }, [])
+
+  /** 从任务记录定位到对话里的那次运行：切回对话、滚到消息、短暂高亮 */
+  const handleLocateRun = useCallback((taskId: string) => {
+    setView('chat')
+    setFocusedRunId(taskId)
+    // 等切回对话、布局恢复后再滚动
+    window.setTimeout(() => {
+      document
+        .getElementById(runAnchorId(taskId))
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 60)
+    window.setTimeout(() => setFocusedRunId(null), 2000)
   }, [])
 
   /** 保存会话重命名：空标题直接忽略，失败时提示并保留对话框 */
@@ -1476,6 +1492,35 @@ export default function App() {
   // 工具回报未授权时，当前页正好是那个站点 —— 胶囊变成「点击授权」
   const tabNeedsGrant = Boolean(pendingPageOrigin) && tabOrigin === pendingPageOrigin
 
+  // 空状态里的建议任务：只在当前页面可被工具操作（http/https）时出现
+  const pageSuggestions = useMemo(() => {
+    if (!provider || !tabOrigin) return []
+    const language = t(lang === 'zh' ? 'options.langZh' : 'options.langEn')
+    return [
+      {
+        key: 'translate',
+        label: t('sidepanel.suggestTranslate', { language }),
+        task: t('sidepanel.suggestTranslateTask', { language }),
+      },
+      {
+        key: 'summarize',
+        label: t('sidepanel.suggestSummarize'),
+        task: t('sidepanel.suggestSummarizeTask'),
+      },
+      {
+        key: 'table',
+        label: t('sidepanel.suggestTable'),
+        task: t('sidepanel.suggestTableTask'),
+      },
+    ]
+  }, [provider, tabOrigin, lang, t])
+
+  // 任务记录里哪些运行能在对话中定位（消息可能已被清空或来自更早版本）
+  const locatableTaskIds = useMemo(
+    () => new Set(messages.map((message) => message.taskId).filter(Boolean) as string[]),
+    [messages],
+  )
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <header
@@ -1690,17 +1735,58 @@ export default function App() {
                   icon="info"
                   title={t('sidepanel.emptyChatTitle')}
                   description={t('sidepanel.emptyChatHint')}
+                  action={
+                    pageSuggestions.length > 0 ? (
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: space.xs,
+                          width: '100%',
+                          maxWidth: 280,
+                        }}
+                      >
+                        {pageSuggestions.map((suggestion) => (
+                          <Button
+                            key={suggestion.key}
+                            variant="secondary"
+                            size="sm"
+                            disabled={generating || !provider}
+                            onClick={() => void handleSend(suggestion.task)}
+                            style={{
+                              justifyContent: 'flex-start',
+                              textAlign: 'left',
+                              whiteSpace: 'normal',
+                              lineHeight: 1.4,
+                              padding: '6px 10px',
+                            }}
+                          >
+                            {suggestion.label}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : undefined
+                  }
                   style={{ marginTop: space.xxl }}
                 />
               ) : (
                 messages.map((message) => (
                   <div
                     key={message.id}
+                    // 任务记录里「定位」据此滚动到这条回复
+                    id={message.taskId ? runAnchorId(message.taskId) : undefined}
                     style={{
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: message.role === 'user' ? 'flex-end' : 'flex-start',
                       marginBottom: 10,
+                      ...(focusedRunId && message.taskId === focusedRunId
+                        ? {
+                            outline: `2px solid ${color.primary}`,
+                            outlineOffset: 4,
+                            borderRadius: radius.md,
+                          }
+                        : null),
                     }}
                   >
                     {/* 一次运行一个块：折叠态是「状态 · 步数 · 耗时」，展开是步骤时间线。
@@ -2125,6 +2211,8 @@ export default function App() {
                 <TaskHistory
                   sessionId={activeSessionId}
                   sessionTitle={activeSession?.title}
+                  locatableTaskIds={locatableTaskIds}
+                  onLocate={handleLocateRun}
                 />
               ) : (
                 <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
@@ -2275,6 +2363,11 @@ function hostFromUrl(url?: string): string | null {
   } catch {
     return url
   }
+}
+
+/** 运行块/任务记录共用的消息锚点 id */
+function runAnchorId(taskId: string): string {
+  return `run-${taskId}`
 }
 
 function toUiMessage(record: SessionMessageRecord): UiMessage {

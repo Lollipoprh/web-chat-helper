@@ -31,6 +31,10 @@ interface TaskHistoryProps {
   sessionId: string
   /** 会话标题，用于在列表头部标明作用范围 */
   sessionTitle?: string
+  /** 能在对话里定位到的任务（对应消息仍在当前会话里） */
+  locatableTaskIds?: Set<string>
+  /** 点击「定位」后切回对话并滚动到那次运行 */
+  onLocate?: (taskId: string) => void
 }
 
 interface StepView {
@@ -56,7 +60,12 @@ const STATUS_TONES: Record<LogTaskStatus, BadgeTone> = {
   round_limit: 'warning',
 }
 
-export default function TaskHistory({ sessionId, sessionTitle }: TaskHistoryProps) {
+export default function TaskHistory({
+  sessionId,
+  sessionTitle,
+  locatableTaskIds,
+  onLocate,
+}: TaskHistoryProps) {
   const { t } = useI18n()
   const [tasks, setTasks] = useState<LogTaskRecord[]>([])
   const [loading, setLoading] = useState(true)
@@ -189,6 +198,20 @@ export default function TaskHistory({ sessionId, sessionTitle }: TaskHistoryProp
                     ? t('history.dropped', { count: task.droppedSteps })
                     : ''}
                 </span>
+                {/* 运行块已经展示步骤细节，这里只需要能跳回那次运行 */}
+                {onLocate && locatableTaskIds?.has(task.taskId) && (
+                  <Button
+                    size="xs"
+                    variant="text"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onLocate(task.taskId)
+                    }}
+                    style={{ flex: 'none', color: color.primarySoftText, padding: '0 4px' }}
+                  >
+                    {t('history.locate')}
+                  </Button>
+                )}
               </div>
               <div style={{ color: color.text, wordBreak: 'break-word' }}>{task.goal}</div>
               {task.tabUrl && (

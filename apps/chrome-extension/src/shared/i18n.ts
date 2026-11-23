@@ -57,6 +57,13 @@ const zh = {
   'sidepanel.emptyChatTitle': '开始一个新任务',
   'sidepanel.emptyChatHint':
     '可以让我读取当前页面、填写表单、整理资料或翻译整页内容。',
+  'sidepanel.suggestTranslate': '把当前页面翻译成{language}',
+  'sidepanel.suggestTranslateTask':
+    '把当前页面翻译成{language}，只改页面，不要在对话里贴译文。',
+  'sidepanel.suggestSummarize': '总结这个页面的要点',
+  'sidepanel.suggestSummarizeTask': '总结这个页面的要点，用简短的分点回答，不要修改页面。',
+  'sidepanel.suggestTable': '把页面主要内容整理成表格',
+  'sidepanel.suggestTableTask': '把页面里的主要内容整理成表格，不要修改页面。',
   'sidepanel.tasks': '任务记录',
   'sidepanel.backToChat': '返回对话',
   'sidepanel.noSession': '尚未选择会话',
@@ -182,6 +189,7 @@ const zh = {
   'history.summary': '共 {count} 个任务，点击查看工具调用明细',
   'history.sessionLabel': '会话：{title}',
   'history.refresh': '刷新',
+  'history.locate': '定位',
   'history.empty': '当前会话还没有任务记录。发送任务后，工具调用步骤会显示在这里。',
   'history.readingSteps': '读取步骤…',
   'history.noSteps': '该任务没有落盘的步骤。',
@@ -311,6 +319,15 @@ const en: Record<MessageKey, string> = {
   'sidepanel.emptyChatTitle': 'Start a new task',
   'sidepanel.emptyChatHint':
     'Ask me to read this page, fill in a form, summarise material, or translate the whole page.',
+  'sidepanel.suggestTranslate': 'Translate this page into {language}',
+  'sidepanel.suggestTranslateTask':
+    'Translate this page into {language}. Edit the page in place and do not paste the translation into the chat.',
+  'sidepanel.suggestSummarize': 'Summarise the key points of this page',
+  'sidepanel.suggestSummarizeTask':
+    'Summarise the key points of this page as a short bullet list. Do not modify the page.',
+  'sidepanel.suggestTable': 'Turn the main content into a table',
+  'sidepanel.suggestTableTask':
+    'Turn the main content of this page into a table. Do not modify the page.',
   'sidepanel.tasks': 'Tasks',
   'sidepanel.backToChat': 'Back to chat',
   'sidepanel.noSession': 'No session selected',
@@ -438,6 +455,7 @@ const en: Record<MessageKey, string> = {
   'history.summary': '{count} tasks — click one to see its tool calls',
   'history.sessionLabel': 'Session: {title}',
   'history.refresh': 'Refresh',
+  'history.locate': 'Locate',
   'history.empty':
     'No task records in this session yet. Tool-call steps appear here after you send a task.',
   'history.readingSteps': 'Loading steps…',
