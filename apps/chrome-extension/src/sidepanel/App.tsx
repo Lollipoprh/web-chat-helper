@@ -89,7 +89,7 @@ import {
   runSlashCommand,
   type ParsedSlashCommand,
 } from './slash-commands'
-import { Alert, Button, Select, TextArea, color, fontSize, radius, space } from '../ui'
+import { Alert, Button, Select, TextArea, color, fontSize, fontWeight, radius, space } from '../ui'
 import {
   bindFile,
   bindFileHandle,
@@ -1545,7 +1545,6 @@ export default function App() {
             background: color.surface,
             transform: view === 'history' ? 'translateX(-100%)' : 'translateX(0)',
             transition: 'transform 240ms ease',
-            boxShadow: dragActive ? `inset 0 0 0 2px ${color.primary}` : undefined,
           }}
         >
           {/* 消息区单独成层，侧拉按钮以此为基准垂直居中，不因输入框而偏移 */}
@@ -1647,21 +1646,6 @@ export default function App() {
           </div>
 
           <footer style={{ padding: 10, borderTop: `1px solid ${color.border}` }}>
-            {dragActive && (
-              <div
-                style={{
-                  marginBottom: 6,
-                  padding: '4px 8px',
-                  borderRadius: radius.sm,
-                  background: color.surfaceSubtle,
-                  color: color.textSecondary,
-                  fontSize: fontSize.xs,
-                  textAlign: 'center',
-                }}
-              >
-                {t('sidepanel.dropToBind')}
-              </div>
-            )}
             {/* 当前会话的文件列表：没有文件时整块隐藏 */}
             {boundFiles.length > 0 && (
               <div
@@ -1928,6 +1912,40 @@ export default function App() {
               </div>
             </div>
           </footer>
+
+          {/* 拖拽文件时用灰色蒙版覆盖对话区和输入框，中心提示松开绑定 */}
+          {dragActive && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: space.xl,
+                background: 'rgba(17, 24, 39, 0.12)',
+                backdropFilter: 'blur(3px)',
+                WebkitBackdropFilter: 'blur(3px)',
+                pointerEvents: 'none',
+              }}
+            >
+              <div
+                style={{
+                  padding: '10px 16px',
+                  background: color.surface,
+                  border: `1px dashed ${color.primary}`,
+                  borderRadius: radius.md,
+                  color: color.primary,
+                  fontSize: fontSize.md,
+                  fontWeight: fontWeight.semibold,
+                  textAlign: 'center',
+                }}
+              >
+                {t('sidepanel.dropToBind')}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 任务记录：点击侧拉按钮时从右侧滑入 */}
