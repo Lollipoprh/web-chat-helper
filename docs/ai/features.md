@@ -114,7 +114,9 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 
 - File handle storage: `apps/chrome-extension/src/shared/file-handle-store.ts` (`bindFile`, `bindFileHandle`, `listBoundFiles`, `unbindFile`, `deleteSessionFiles`) — key is `${session_id}::${name}` with a `by_sessionId` index; the v5 DB upgrade recreates the store and drops legacy global bindings (no migration)
 - File tools: `apps/chrome-extension/src/sidepanel/file-tools.ts` (`createFileTools(sessionId)`) — `list_bound_files` and every read/write are limited to files bound to the current session
-- Side Panel UI: file list sits above the composer, is hidden when empty, and the "Add file" button opens the system picker directly (no management panel); dropping files onto the chat panel or composer binds them to the current session through `DataTransferItem.getAsFileSystemHandle()`
+- Side Panel UI: bound files are chips in the context strip under the composer (hidden when none), and the attach icon opens the system picker directly; dropping files onto the chat panel or composer binds them to the current session through `DataTransferItem.getAsFileSystemHandle()`
+- File preview (first slice of the artifacts surface): `apps/chrome-extension/src/sidepanel/components/FilePreview.tsx` — clicking a file chip reads the bound handle, shows the first 200 lines / 12k characters in a dialog, and reports binary files or a revoked permission instead of failing silently
+- Display formatting shared by the panel and dialogs: `apps/chrome-extension/src/shared/format.ts` (`formatFileSize`, `formatDateTime`)
 
 ## Provider configuration: model, key, and URL
 

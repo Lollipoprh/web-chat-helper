@@ -82,6 +82,7 @@ import {
   setDefaultProvider,
 } from '../shared/storage'
 import TaskHistory from './TaskHistory'
+import { FilePreview } from './components/FilePreview'
 import { MessageBubble, type MessageStatus } from './components/MessageBubble'
 import { ModelPicker } from './components/ModelPicker'
 import { RunBlock } from './components/RunBlock'
@@ -222,6 +223,8 @@ export default function App() {
   const [renameDraft, setRenameDraft] = useState<string | null>(null)
   // 刚从任务记录定位过来的运行：短暂高亮对应消息
   const [focusedRunId, setFocusedRunId] = useState<string | null>(null)
+  // 正在预览的已绑定文件；非 null 时打开预览对话框
+  const [previewFile, setPreviewFile] = useState<BoundFileMeta | null>(null)
   // 文件管理：当前会话绑定的本地文件列表
   const [boundFiles, setBoundFiles] = useState<BoundFileMeta[]>([])
   // 当前会话累计 token 用量，用于标题栏下方的用量条
@@ -2212,7 +2215,8 @@ export default function App() {
                     key={file.name}
                     icon="file"
                     label={file.name}
-                    title={`${file.name} · ${formatFileSize(file.size)}`}
+                    title={t('file.previewTitle', { name: file.name })}
+                    onClick={() => setPreviewFile(file)}
                     onRemove={() => void handleUnbindFile(file.name)}
                     removeLabel={t('sidepanel.unbind')}
                   />
@@ -2337,6 +2341,15 @@ export default function App() {
           }}
         />
       </Dialog>
+
+      {/* 已绑定文件的只读预览：产物面板的第一期 */}
+      {activeSessionId && (
+        <FilePreview
+          sessionId={activeSessionId}
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
+        />
+      )}
     </div>
   )
 }
@@ -2420,12 +2433,6 @@ function readDroppedFileHandle(item: DataTransferItem): Promise<FileSystemFileHa
       handle?.kind === 'file' ? (handle as unknown as FileSystemFileHandle) : null,
     )
     .catch(() => null)
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 /** 状态条上展示的主机名；URL 解析失败时退回原串，不隐藏信息 */
