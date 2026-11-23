@@ -14,6 +14,11 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
 First stable release: the UI is rebuilt on design tokens, and a run itself is now first-class —
 readable, traceable and retryable.
 
+From 1.0.0 on, stored data, cross-context messages and tool contracts follow the 1.x compatibility
+policy in [docs/compatibility.md](docs/compatibility.md).
+自 1.0.0 起，存储结构、跨上下文消息与工具契约遵循
+[docs/compatibility.md](docs/compatibility.md) 中的 1.x 兼容性策略。
+
 ### Added / 新增
 
 - **Design system and dark mode** — semantic CSS-variable tokens with `light-dark()`, a
