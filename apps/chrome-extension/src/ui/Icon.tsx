@@ -26,6 +26,8 @@ export type IconName =
   | 'chevron-left'
   | 'chevron-right'
   | 'arrow-up'
+  | 'globe'
+  | 'file'
   | 'paperclip'
   | 'refresh'
   | 'alert'
@@ -117,6 +119,18 @@ const ICONS: Record<IconName, Shape[]> = {
   'arrow-up': [
     { t: 'line', x1: 12, y1: 19, x2: 12, y2: 5 },
     { t: 'path', d: 'm5 12 7-7 7 7' },
+  ],
+  globe: [
+    { t: 'circle', cx: 12, cy: 12, r: 10 },
+    { t: 'path', d: 'M2 12h20' },
+    {
+      t: 'path',
+      d: 'M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z',
+    },
+  ],
+  file: [
+    { t: 'path', d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' },
+    { t: 'path', d: 'M14 2v6h6' },
   ],
   paperclip: [
     {

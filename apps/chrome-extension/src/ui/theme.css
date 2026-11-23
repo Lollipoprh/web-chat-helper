@@ -290,6 +290,32 @@ body {
   box-shadow: none;
 }
 
+/* 菜单项、胶囊、分段控件：同样是内联样式写不了伪类，统一在这里补 */
+.ui-menu-item:not(:disabled):hover {
+  background: var(--wc-surface-subtle);
+}
+
+.ui-menu-item:disabled {
+  cursor: not-allowed;
+}
+
+.ui-dropdown-trigger:not(:disabled):hover {
+  opacity: 0.82;
+}
+
+.ui-chip-action:not(:disabled):hover {
+  filter: brightness(var(--wc-hover-brightness));
+}
+
+.ui-chip-remove:not(:disabled):hover {
+  background: var(--wc-surface-disabled);
+  opacity: 1;
+}
+
+.ui-segmented button:not(:disabled):hover {
+  color: var(--wc-text);
+}
+
 /* 侧栏右缘的侧拉标签：补上悬浮反馈，命中区在组件里放大到 24×60 */
 .ui-pull-tab {
   transition:

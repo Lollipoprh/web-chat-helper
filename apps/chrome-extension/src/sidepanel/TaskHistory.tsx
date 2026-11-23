@@ -1,7 +1,7 @@
 // 当前会话的任务记录：按会话读取 IndexedDB 中的任务，展开查看每一步工具调用。
 // 只展示已落盘的脱敏摘要，不读取页面内容。
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   listSessionTasks,
   listTaskSteps,
@@ -26,7 +26,10 @@ import type { MessageKey } from '../shared/i18n'
 import { useI18n } from '../shared/useI18n'
 
 interface TaskHistoryProps {
+  /** 只读取这个会话的任务 */
   sessionId: string
+  /** 会话标题，用于在列表头部标明作用范围 */
+  sessionTitle?: string
 }
 
 interface StepView {
@@ -52,21 +55,27 @@ const STATUS_TONES: Record<LogTaskStatus, BadgeTone> = {
   round_limit: 'warning',
 }
 
-export default function TaskHistory({ sessionId }: TaskHistoryProps) {
+export default function TaskHistory({ sessionId, sessionTitle }: TaskHistoryProps) {
   const { t } = useI18n()
   const [tasks, setTasks] = useState<LogTaskRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
   const [stepView, setStepView] = useState<StepView | null>(null)
+  // 会话切换时可能有多个读取在飞：只接受最后一次请求的结果，避免串到别的会话
+  const requestRef = useRef(0)
 
   const loadTasks = useCallback(async () => {
+    const requestId = requestRef.current + 1
+    requestRef.current = requestId
     setLoading(true)
     try {
-      setTasks(await listSessionTasks(sessionId))
+      const next = await listSessionTasks(sessionId)
+      if (requestRef.current !== requestId) return
+      setTasks(next)
     } catch (error) {
       console.warn('[history] 读取任务记录失败', error)
     } finally {
-      setLoading(false)
+      if (requestRef.current === requestId) setLoading(false)
     }
   }, [sessionId])
 
@@ -96,16 +105,29 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
 
   return (
     <div style={{ fontSize: fontSize.sm }}>
+      {/* 头部先标明作用范围：这份列表只属于当前会话 */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: space.md,
-          marginBottom: 10,
+          marginBottom: 4,
         }}
       >
-        <div style={{ flex: 1, color: color.textMuted }}>
-          {t('history.summary', { count: tasks.length })}
+        <div
+          title={sessionTitle}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            color: color.textSecondary,
+          }}
+        >
+          {t('history.sessionLabel', {
+            title: sessionTitle?.trim() ? sessionTitle : t('sidepanel.noSession'),
+          })}
         </div>
         <Button
           size="xs"
@@ -115,6 +137,16 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
         >
           {t('history.refresh')}
         </Button>
+      </div>
+
+      <div
+        style={{
+          color: color.textFaint,
+          fontSize: fontSize.xs,
+          marginBottom: 10,
+        }}
+      >
+        {t('history.summary', { count: tasks.length })}
       </div>
 
       {loading ? (

@@ -1,9 +1,10 @@
-// 上下文用量条：宽度自适应侧边栏，用颜色而非文字展示占用。
-// 轨道为浅蓝色，输入段浅绿、输出段黄色；窗口占满后整条变为橙红色。
-// 具体 token 数值只在鼠标悬浮时通过通用 Tooltip 显示。
+// 上下文用量指示：紧凑形态，放在 composer 下方的状态条里。
+//
+// 之前是通栏长条，独占一行且离发送动作很远。现在压缩成「迷你条 + 百分比」，
+// 具体数值仍通过通用 Tooltip 悬浮查看，进度语义保留给读屏。
 
 import { useI18n } from '../../shared/useI18n'
-import { Tooltip, color, radius, space } from '../../ui'
+import { Tooltip, color, fontSize, radius, space } from '../../ui'
 
 export interface UsageMeterProps {
   inputTokens: number
@@ -12,6 +13,9 @@ export interface UsageMeterProps {
   /** 当前上下文估算；提供时进度条按它绘制，而不是会话累计用量 */
   contextTokens?: number
 }
+
+/** 迷你进度条宽度：够看出比例，又不至于抢走输入区的空间 */
+const BAR_WIDTH = 44
 
 export function UsageMeter({
   inputTokens,
@@ -24,16 +28,6 @@ export function UsageMeter({
   const used = contextMode ? Math.max(0, contextTokens) : inputTokens + outputTokens
   const full = contextWindow > 0 && used >= contextWindow
   const usedRatio = contextWindow > 0 ? Math.min(1, used / contextWindow) : 0
-  const inputRatio = contextMode
-    ? usedRatio
-    : contextWindow > 0
-      ? Math.min(1, inputTokens / contextWindow)
-      : 0
-  const outputRatio = contextMode
-    ? 0
-    : contextWindow > 0
-      ? Math.min(1 - inputRatio, outputTokens / contextWindow)
-      : 0
 
   const tooltip = contextMode
     ? `${t('sidepanel.usageContext')} ${formatTokens(used)} · ${t('sidepanel.usageWindow')} ${formatTokens(contextWindow)}`
@@ -42,54 +36,47 @@ export function UsageMeter({
       )} ${formatTokens(outputTokens)} · ${t('sidepanel.usageWindow')} ${formatTokens(contextWindow)}`
 
   return (
-    <div style={{ padding: `${space.xs}px ${space.lg}px ${space.sm}px` }}>
-      <Tooltip content={tooltip} placement="top" style={{ padding: '2px 0' }}>
-        <div
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(usedRatio * 100)}
-          aria-label={tooltip}
+    <Tooltip content={tooltip} placement="top" className="ui-usage-meter">
+      <div
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(usedRatio * 100)}
+        aria-label={tooltip}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: space.xs,
+          flex: 'none',
+          fontSize: fontSize.xs,
+          color: full ? color.danger : color.textFaint,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <span
+          aria-hidden="true"
           style={{
-            position: 'relative',
-            width: '100%',
-            height: 6,
+            width: BAR_WIDTH,
+            height: 4,
             borderRadius: radius.pill,
+            background: color.usageTrack,
             overflow: 'hidden',
             boxSizing: 'border-box',
-            background: full ? color.usageFull : color.usageTrack,
-            // 细边线保留轮廓，外发光让边缘更柔和
-            border: `1px solid ${full ? color.usageFull : color.usageTrack}`,
-            boxShadow: `0 0 8px ${full ? color.usageGlowFull : color.usageGlow}`,
           }}
         >
-          {!full && (
-            <>
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  bottom: 0,
-                  left: 0,
-                  width: `${inputRatio * 100}%`,
-                  background: color.usageInput,
-                }}
-              />
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  bottom: 0,
-                  left: `${inputRatio * 100}%`,
-                  width: `${outputRatio * 100}%`,
-                  background: color.usageOutput,
-                }}
-              />
-            </>
-          )}
-        </div>
-      </Tooltip>
-    </div>
+          <span
+            style={{
+              display: 'block',
+              width: `${Math.max(usedRatio, used > 0 ? 0.02 : 0) * 100}%`,
+              height: '100%',
+              borderRadius: radius.pill,
+              background: full ? color.usageFull : color.primary,
+            }}
+          />
+        </span>
+        <span>{Math.round(usedRatio * 100)}%</span>
+      </div>
+    </Tooltip>
   )
 }
 

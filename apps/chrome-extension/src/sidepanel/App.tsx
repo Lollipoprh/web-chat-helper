@@ -92,11 +92,16 @@ import {
 import {
   Alert,
   Button,
+  Chip,
+  Dropdown,
   EmptyState,
   Icon,
   IconButton,
   LoadingRow,
-  Select,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  Segmented,
   TextArea,
   color,
   fontSize,
@@ -125,6 +130,9 @@ import {
 
 /** 右键菜单请求的有效期：超过后视为过期，避免下次打开面板时误触发 */
 const TRANSLATE_REQUEST_TTL_MS = 60_000
+
+/** 输入框自动增高的上限：约 6 行，再多就在框内滚动 */
+const COMPOSER_MAX_HEIGHT = 132
 
 /**
  * System prompt (English) —— concise, scope-locked.
@@ -216,9 +224,12 @@ export default function App() {
 
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
   const confirmResolverRef = useRef<((allowed: boolean) => void) | null>(null)
   // 当前活动标签页：发送任务时同步读取，用于绑定目标页并申请站点权限
   const activeTabRef = useRef<{ id?: number; url?: string } | null>(null)
+  // 同一份数据的可渲染副本：状态条上的「当前页面」胶囊需要随切页更新
+  const [activeTab, setActiveTab] = useState<{ title?: string; url?: string } | null>(null)
   // 右键菜单触发的整页翻译：待处理请求、去重集合与启动保护
   const [queuedTranslate, setQueuedTranslate] = useState<TranslatePageRequest | null>(null)
   const queuedTranslateRef = useRef<TranslatePageRequest | null>(null)
@@ -331,6 +342,7 @@ export default function App() {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
         if (disposed) return
         activeTabRef.current = tab ? { id: tab.id, url: tab.url } : null
+        setActiveTab(tab ? { title: tab.title, url: tab.url } : null)
       } catch (error) {
         console.warn('[sidepanel] 读取活动标签页失败:', error)
       }
@@ -356,6 +368,14 @@ export default function App() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' })
   }, [messages])
+
+  // 输入框随内容自动增高：空闲时只占一行，多行输入后再长到上限
+  useEffect(() => {
+    const element = composerRef.current
+    if (!element) return
+    element.style.height = 'auto'
+    element.style.height = `${Math.min(element.scrollHeight, COMPOSER_MAX_HEIGHT)}px`
+  }, [input])
 
   const openOptions = useCallback(() => {
     chrome.runtime.openOptionsPage()
@@ -1387,6 +1407,18 @@ export default function App() {
   const canSend =
     Boolean(provider) && Boolean(activeSessionId) && input.trim().length > 0 && !generating
 
+  // —— 顶部 HUD / 底部上下文条所需的派生值
+  const activeSession = sessions.find((session) => session.sessionId === activeSessionId) ?? null
+  const statusLabel = pendingConfirmation
+    ? t('sidepanel.statusAwaiting')
+    : generating
+      ? t('sidepanel.statusRunning')
+      : null
+  const tabOrigin = activeTab?.url ? originPatternFromUrl(activeTab.url) : null
+  const tabHost = hostFromUrl(activeTab?.url)
+  // 工具回报未授权时，当前页正好是那个站点 —— 胶囊变成「点击授权」
+  const tabNeedsGrant = Boolean(pendingPageOrigin) && tabOrigin === pendingPageOrigin
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <header
@@ -1395,7 +1427,8 @@ export default function App() {
           borderBottom: `1px solid ${color.border}`,
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: space.md,
+          flex: 'none',
         }}
       >
         <img
@@ -1406,17 +1439,139 @@ export default function App() {
           height={20}
           style={{ flex: 'none', display: 'block' }}
         />
-        <div
-          style={{
-            minWidth: 0,
-            flex: 1,
-            fontSize: fontSize.lg,
-            fontWeight: fontWeight.semibold,
-            lineHeight: 1.3,
-          }}
+
+        {/* 会话切换与增删改都收进标题菜单：侧栏宽度放不下一排并排按钮 */}
+        <Dropdown
+          triggerLabel={t('sidepanel.switchSession')}
+          width={272}
+          disabled={!historyLoaded}
+          triggerStyle={{ flex: 1, minWidth: 0 }}
+          label={
+            <>
+              <span
+                style={{
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontSize: fontSize.lg,
+                  fontWeight: fontWeight.semibold,
+                  color: color.text,
+                  lineHeight: 1.3,
+                }}
+              >
+                {activeSession?.title || t('sidepanel.noSession')}
+              </span>
+              <Icon name="chevron-down" size={12} style={{ color: color.textFaint }} />
+            </>
+          }
         >
-          Web Chat Helper
-        </div>
+          {(close) => (
+            <>
+              <MenuLabel>{t('sidepanel.sessionsTitle')}</MenuLabel>
+              {sessions.length === 0 ? (
+                <MenuItem
+                  label={t('sidepanel.noSession')}
+                  disabled
+                  onSelect={() => undefined}
+                />
+              ) : (
+                // 会话多时只让列表滚动，下方的新建/清空/删除与任务记录保持可见
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    maxHeight: 220,
+                    overflowY: 'auto',
+                  }}
+                >
+                  {sessions.map((session) => (
+                    <MenuItem
+                      key={session.sessionId}
+                      label={session.title || t('sidepanel.noSession')}
+                      hint={session.messageCount}
+                      selected={session.sessionId === activeSessionId}
+                      disabled={generating}
+                      onSelect={() => {
+                        close()
+                        void handleSwitchSession(session.sessionId)
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+              <MenuSeparator />
+              <MenuItem
+                icon="plus"
+                label={t('sidepanel.newSession')}
+                disabled={generating}
+                onSelect={() => {
+                  close()
+                  void handleNewSession()
+                }}
+              />
+              <MenuItem
+                icon="eraser"
+                label={t('sidepanel.clearChatAction')}
+                disabled={generating || !activeSessionId}
+                onSelect={() => {
+                  close()
+                  void handleClear()
+                }}
+              />
+              <MenuItem
+                icon="trash"
+                tone="danger"
+                label={t('sidepanel.deleteSessionAction')}
+                disabled={generating || !activeSessionId}
+                onSelect={() => {
+                  close()
+                  void handleDeleteSession()
+                }}
+              />
+              <MenuSeparator />
+              <MenuItem
+                icon="list"
+                label={t('sidepanel.tasks')}
+                disabled={!activeSessionId}
+                onSelect={() => {
+                  close()
+                  setView('history')
+                }}
+              />
+            </>
+          )}
+        </Dropdown>
+
+        {statusLabel && (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: space.xs,
+              flex: 'none',
+              height: 22,
+              padding: `0 ${space.sm}px`,
+              borderRadius: radius.pill,
+              background: pendingConfirmation ? color.warningSoft : color.primarySoft,
+              color: pendingConfirmation ? color.warningText : color.primarySoftText,
+              fontSize: fontSize.xs,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: radius.pill,
+                background: 'currentColor',
+              }}
+            />
+            {statusLabel}
+          </span>
+        )}
+
         <IconButton
           icon="settings"
           label={t('common.settings')}
@@ -1426,59 +1581,6 @@ export default function App() {
         />
       </header>
 
-      <div
-        style={{
-          padding: '8px 14px',
-          borderBottom: `1px solid ${color.border}`,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          flexWrap: 'wrap',
-        }}
-      >
-        <Select
-          value={activeSessionId ?? ''}
-          onChange={(event) => void handleSwitchSession(event.target.value)}
-          disabled={generating || !historyLoaded || sessions.length === 0}
-          title={t('sidepanel.switchSession')}
-          size="sm"
-          block={false}
-          options={sessions.map((session) => ({
-            value: session.sessionId,
-            label: `${session.title}（${session.messageCount}）`,
-          }))}
-          style={{ flex: '1 1 120px', minWidth: 0 }}
-        />
-        <Button
-          size="sm"
-          onClick={() => void handleNewSession()}
-          disabled={generating}
-        >
-          {t('sidepanel.newSession')}
-        </Button>
-        <Button
-          size="sm"
-          onClick={() => void handleDeleteSession()}
-          disabled={generating || !activeSessionId}
-        >
-          {t('sidepanel.deleteSession')}
-        </Button>
-        <Button
-          size="sm"
-          onClick={handleClear}
-          disabled={generating || !activeSessionId}
-        >
-          {t('sidepanel.clearChat')}
-        </Button>
-      </div>
-
-      <UsageMeter
-        inputTokens={tokenUsage.inputTokens}
-        outputTokens={tokenUsage.outputTokens}
-        contextTokens={contextTokens}
-        contextWindow={provider?.contextWindow ?? DEFAULT_CONTEXT_WINDOW}
-      />
-
       {banner && (
         <Alert tone="error" flush style={{ padding: '8px 14px' }}>
           {banner}
@@ -1487,7 +1589,7 @@ export default function App() {
               <Button
                 size="sm"
                 style={{
-                  background: color.danger,
+                  background: color.dangerSolid,
                   color: color.textInverse,
                   borderColor: 'transparent',
                 }}
@@ -1517,7 +1619,7 @@ export default function App() {
           <Button
             size="sm"
             style={{
-              background: color.warning,
+              background: color.warningSolid,
               color: color.textInverse,
               borderColor: 'transparent',
             }}
@@ -1525,49 +1627,6 @@ export default function App() {
           >
             {t('sidepanel.dismiss')}
           </Button>
-        </Alert>
-      )}
-
-      {pendingConfirmation && (
-        <Alert tone="warning" flush style={{ padding: '10px 14px' }}>
-          <div style={{ fontWeight: 600, marginBottom: space.sm }}>
-            {t('sidepanel.awaitingConfirmation')}
-            <span style={{ fontFamily: 'monospace' }}>{pendingConfirmation.toolName}</span>
-          </div>
-          <div
-            style={{
-              background: color.surface,
-              border: `1px solid ${color.warningBorder}`,
-              borderRadius: radius.sm,
-              padding: '6px 8px',
-              marginBottom: space.md,
-              wordBreak: 'break-all',
-              color: color.textMuted,
-            }}
-          >
-            {pendingConfirmation.argsPreview}
-          </div>
-          <div style={{ display: 'flex', gap: space.md }}>
-            <Button
-              size="sm"
-              style={{
-                background: color.success,
-                color: color.textInverse,
-                borderColor: 'transparent',
-              }}
-              onClick={handleConfirmAction}
-            >
-              {t('sidepanel.run')}
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              style={{ color: color.warningText, borderColor: color.warningBorder }}
-              onClick={handleDenyAction}
-            >
-              {t('sidepanel.deny')}
-            </Button>
-          </div>
         </Alert>
       )}
 
@@ -1686,58 +1745,79 @@ export default function App() {
           </div>
 
           <footer style={{ padding: 10, borderTop: `1px solid ${color.border}` }}>
-            {/* 当前会话的文件列表：没有文件时整块隐藏 */}
-            {boundFiles.length > 0 && (
+            {/* 副作用动作审批：贴在输入区上方，出现时不打断消息流的位置 */}
+            {pendingConfirmation && (
               <div
+                role="group"
+                aria-label={t('sidepanel.awaitingConfirmation')}
                 style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 2,
-                  maxHeight: 96,
-                  overflowY: 'auto',
-                  marginBottom: 6,
+                  marginBottom: space.md,
+                  padding: '8px 10px',
+                  border: `1px solid ${color.warningBorder}`,
+                  borderRadius: radius.lg,
+                  background: color.warningSoft,
                 }}
               >
-                {boundFiles.map((file) => (
-                  <div
-                    key={file.name}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: space.sm,
-                      padding: '2px 6px',
-                      borderRadius: radius.sm,
-                      background: color.surfaceMuted,
-                      fontSize: fontSize.xs,
-                    }}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: space.sm,
+                    color: color.warningText,
+                    fontSize: fontSize.sm,
+                    fontWeight: fontWeight.medium,
+                  }}
+                >
+                  <Icon name="alert" size={14} style={{ flex: 'none' }} />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    {t('sidepanel.awaitingConfirmation')}
+                  </span>
+                  <span style={{ fontFamily: 'monospace', fontSize: fontSize.xs }}>
+                    {pendingConfirmation.toolName}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    margin: `${space.sm}px 0 ${space.md}px`,
+                    maxHeight: 72,
+                    overflowY: 'auto',
+                    padding: '4px 6px',
+                    border: `1px solid ${color.warningBorder}`,
+                    borderRadius: radius.sm,
+                    background: color.surface,
+                    color: color.textMuted,
+                    fontFamily: 'monospace',
+                    fontSize: fontSize.xs,
+                    lineHeight: 1.5,
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {pendingConfirmation.argsPreview}
+                </div>
+                <div style={{ display: 'flex', gap: space.md, justifyContent: 'flex-end' }}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    style={{ color: color.warningText, borderColor: color.warningBorder }}
+                    onClick={handleDenyAction}
                   >
-                    <span
-                      title={file.name}
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        color: color.textSecondary,
-                      }}
-                    >
-                      {file.name}
-                    </span>
-                    <span style={{ flex: 'none', color: color.textFaint }}>
-                      {formatFileSize(file.size)}
-                    </span>
-                    <IconButton
-                      icon="x"
-                      size="xs"
-                      label={t('sidepanel.unbind')}
-                      onClick={() => void handleUnbindFile(file.name)}
-                      style={{ background: 'transparent', color: color.textFaint }}
-                    />
-                  </div>
-                ))}
+                    {t('sidepanel.deny')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    style={{
+                      background: color.successSolid,
+                      color: color.textInverse,
+                      borderColor: 'transparent',
+                    }}
+                    onClick={handleConfirmAction}
+                  >
+                    {t('sidepanel.run')}
+                  </Button>
+                </div>
               </div>
             )}
+
             {/* 输入区整体容器：上方真实输入框，下方单独一行放模型选择、权限选择和发送按钮 */}
             <div
               className="ui-composer"
@@ -1811,6 +1891,7 @@ export default function App() {
                 </div>
               )}
               <TextArea
+                ref={composerRef}
                 value={input}
                 onChange={(event) => {
                   setInput(event.target.value)
@@ -1824,14 +1905,14 @@ export default function App() {
                     : t('sidepanel.inputPlaceholderNoProvider')
                 }
                 disabled={!provider || loading}
-                rows={3}
+                rows={1}
                 style={{
                   display: 'block',
                   border: 'none',
                   borderRadius: 0,
                   background: 'transparent',
                   padding: '4px 8px',
-                  maxHeight: 140,
+                  maxHeight: COMPOSER_MAX_HEIGHT,
                   overflowY: 'auto',
                   lineHeight: 1.4,
                 }}
@@ -1851,84 +1932,66 @@ export default function App() {
                     value={provider?.id ?? ''}
                     disabled={generating}
                     onChange={handleProviderChange}
+                    style={{ flex: '1 1 auto', minWidth: 0 }}
+                    streamingLabel={
+                      provider
+                        ? provider.supportsStreaming
+                          ? t('sidepanel.streaming')
+                          : t('sidepanel.nonStreaming')
+                        : undefined
+                    }
                   />
                 ) : (
-                  <span style={{ flex: 1, fontSize: 11, color: color.textFaint }}>
+                  <span style={{ flex: 1, fontSize: fontSize.xs, color: color.textFaint }}>
                     {t('sidepanel.noProvider')}
                   </span>
                 )}
-                <Select
-                  size="sm"
-                  block={false}
+
+                <Segmented
+                  ariaLabel={t('sidepanel.autoModeOffTitle')}
                   value={skipConfirm ? 'skip' : 'confirm'}
-                  onChange={(event) => {
-                    if ((event.target.value === 'skip') === skipConfirm) return
+                  onChange={(next) => {
+                    if ((next === 'skip') === skipConfirm) return
                     void handleToggleSkipConfirm()
                   }}
-                  title={
-                    skipConfirm
-                      ? t('sidepanel.autoModeOnTitle')
-                      : t('sidepanel.autoModeOffTitle')
-                  }
                   options={[
-                    { value: 'confirm', label: t('sidepanel.confirmMode') },
-                    { value: 'skip', label: t('sidepanel.autoMode') },
+                    {
+                      value: 'confirm',
+                      label: t('sidepanel.confirmMode'),
+                      title: t('sidepanel.autoModeOffTitle'),
+                    },
+                    {
+                      value: 'skip',
+                      label: t('sidepanel.autoMode'),
+                      title: t('sidepanel.autoModeOnTitle'),
+                    },
                   ]}
-                  style={{
-                    flex: 'none',
-                    width: 96,
-                    minWidth: 0,
-                    border: 'none',
-                    appearance: 'none',
-                    background: color.surfaceSubtle,
-                    color: skipConfirm ? color.warning : color.textSecondary,
-                  }}
                 />
-                {provider && (
-                  <span
-                    style={{
-                      flex: 'none',
-                      fontSize: 11,
-                      color: color.textFaint,
-                    }}
-                  >
-                    {provider.supportsStreaming
-                      ? t('sidepanel.streaming')
-                      : t('sidepanel.nonStreaming')}
-                  </span>
-                )}
+
                 {generating ? (
                   <Button
                     size="sm"
                     variant="danger"
-                    style={{ marginLeft: 'auto', flex: 'none' }}
+                    style={{ flex: 'none' }}
                     onClick={handleStop}
                   >
                     {t('sidepanel.stop')}
                   </Button>
                 ) : (
                   <>
-                    <Button
+                    <IconButton
+                      icon="paperclip"
+                      label={t('sidepanel.addFile')}
                       size="sm"
-                      style={{
-                        marginLeft: 'auto',
-                        flex: 'none',
-                        border: 'none',
-                        borderRadius: radius.sm,
-                        background: color.surfaceSubtle,
-                        color: activeSessionId ? color.textSecondary : color.textFaint,
-                        padding: '4px 8px',
-                        fontSize: fontSize.sm,
-                        lineHeight: 1.5,
-                      }}
+                      variant="text"
                       disabled={!activeSessionId}
                       onClick={() => void handleAddFile()}
-                    >
-                      {t('sidepanel.addFile')}
-                    </Button>
+                      style={{ flex: 'none' }}
+                    />
                     <Button
                       size="sm"
                       variant="primary"
+                      style={{ flex: 'none' }}
                       disabled={!canSend}
                       onClick={() => void handleSend()}
                     >
@@ -1937,6 +2000,61 @@ export default function App() {
                   </>
                 )}
               </div>
+            </div>
+
+            {/* 状态条：上下文（当前页面 / 已绑定文件）在左，上下文用量在右 */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: space.sm,
+                paddingTop: space.sm,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  gap: space.xs,
+                  flex: 1,
+                  minWidth: 0,
+                  maxHeight: 52,
+                  overflowY: 'auto',
+                }}
+              >
+                {tabHost ? (
+                  <Chip
+                    icon={tabNeedsGrant ? 'alert' : 'globe'}
+                    tone={tabNeedsGrant ? 'danger' : 'neutral'}
+                    label={tabHost}
+                    title={
+                      tabNeedsGrant
+                        ? `${t('sidepanel.grantSite')} · ${tabHost}`
+                        : `${activeTab?.title ?? tabHost}\n${activeTab?.url ?? ''}`
+                    }
+                    onClick={tabNeedsGrant ? () => void handleGrantPagePermission() : undefined}
+                  />
+                ) : null}
+
+                {boundFiles.map((file) => (
+                  <Chip
+                    key={file.name}
+                    icon="file"
+                    label={file.name}
+                    title={`${file.name} · ${formatFileSize(file.size)}`}
+                    onRemove={() => void handleUnbindFile(file.name)}
+                    removeLabel={t('sidepanel.unbind')}
+                  />
+                ))}
+              </div>
+
+              <UsageMeter
+                inputTokens={tokenUsage.inputTokens}
+                outputTokens={tokenUsage.outputTokens}
+                contextTokens={contextTokens}
+                contextWindow={provider?.contextWindow ?? DEFAULT_CONTEXT_WINDOW}
+              />
             </div>
           </footer>
 
@@ -1991,7 +2109,10 @@ export default function App() {
             {/* 右侧留出侧拉按钮的宽度，避免列表内容与按钮边框重叠 */}
             <main style={{ flex: 1, overflowY: 'auto', padding: '12px 32px 12px 14px' }}>
               {activeSessionId ? (
-                <TaskHistory sessionId={activeSessionId} />
+                <TaskHistory
+                  sessionId={activeSessionId}
+                  sessionTitle={activeSession?.title}
+                />
               ) : (
                 <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
                   {t('sidepanel.noSession')}
@@ -2087,6 +2208,16 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** 状态条上展示的主机名；URL 解析失败时退回原串，不隐藏信息 */
+function hostFromUrl(url?: string): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
 }
 
 function toUiMessage(record: SessionMessageRecord): UiMessage {

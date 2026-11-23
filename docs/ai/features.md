@@ -45,11 +45,15 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 ## Side panel UI and chat interaction
 
 - Main UI: `apps/chrome-extension/src/sidepanel/App.tsx`
-- Header: title plus a settings `IconButton` (shared `Icon` set) that opens Settings; the model name lives in the bottom `ModelPicker`
+- Header (HUD): brand mark + session title that opens the session `Dropdown` menu (switch / new / clear / delete / task history), a status pill (`sidepanel.statusRunning` / `statusAwaiting`, only while active) and the settings `IconButton`
+- Session actions live in the header menu, not in a toolbar row — `apps/chrome-extension/src/ui/Menu.tsx` (`Dropdown`, `MenuItem`)
+- Composer: one-line `TextArea` that grows to `COMPOSER_MAX_HEIGHT`, then a control row with `ModelPicker`, the confirm/auto `Segmented`, the attach `IconButton` and send/stop
+- Context strip under the composer: current-page chip (turns `danger` and grants permission on click when `pendingPageOrigin` matches the tab), one removable chip per bound file, and the compact `UsageMeter`
+- Side-effect approval bar sits just above the composer (`pendingConfirmation`) so confirmations do not push the transcript
 - Empty state (no provider / no messages) and loading rows use the shared `EmptyState` / `LoadingRow` primitives
-- Usage meter: `apps/chrome-extension/src/sidepanel/components/UsageMeter.tsx` — cumulative input/output tokens and context window with a progress bar
+- Usage meter: `apps/chrome-extension/src/sidepanel/components/UsageMeter.tsx` — compact bar + percentage, details on hover
 - System prompt and task policies: `apps/chrome-extension/src/sidepanel/App.tsx` (`SYSTEM_PROMPT`) — page translation defaults to in-place DOM edits unless the user asks for a chat reply
-- Task history: `apps/chrome-extension/src/sidepanel/TaskHistory.tsx`
+- Task history: `apps/chrome-extension/src/sidepanel/TaskHistory.tsx` — reads only the active session (`listSessionTasks(sessionId)`), shows the session title in its header, and drops stale results when the session is switched mid-read
 - Message bubble and tool-call card: `apps/chrome-extension/src/sidepanel/components/`
 
 ## Interface language (zh / en)
@@ -65,7 +69,7 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 
 - Design tokens (numeric scales: radius, font size/weight, spacing, control size, shadow, motion, z-index, icon size): `apps/chrome-extension/src/ui/tokens.ts`
 - Color tokens are CSS variables, not literals: `apps/chrome-extension/src/ui/theme.css` (`--wc-*`) — light/dark via `light-dark()`, plus `:focus-visible` ring, `.ui-button` hover/active states, spinner and skeleton keyframes. `tokens.ts` only references `var(--wc-*)`, so every component is theme-aware without changes
-- Shared primitives: `apps/chrome-extension/src/ui/` — Button, IconButton, Icon, Input, TextArea, Select, Checkbox, Field, Alert, Card, Badge, Tooltip, Spinner/LoadingRow, Skeleton/SkeletonLines, EmptyState, Dialog
+- Shared primitives: `apps/chrome-extension/src/ui/` — Button, IconButton, Icon, Input, TextArea, Select, Checkbox, Field, Alert, Card, Badge, Tooltip, Spinner/LoadingRow, Skeleton/SkeletonLines, EmptyState, Dialog, Dropdown/MenuItem, Segmented, Chip
 - Component prop conventions and override rules: `apps/chrome-extension/src/ui/index.ts`
 - Settings-page layout styles: `apps/chrome-extension/src/options/styles.ts`
 

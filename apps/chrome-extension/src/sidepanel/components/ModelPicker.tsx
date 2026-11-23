@@ -27,6 +27,10 @@ export interface ModelPickerProps {
   value: string
   disabled?: boolean
   onChange: (id: string) => void
+  /** 外层容器的尺寸约束；默认按内容收缩，输入区里可改成撑满剩余宽度 */
+  style?: CSSProperties
+  /** 输出方式说明（流式 / 非流式），只出现在触发按钮的悬浮提示里 */
+  streamingLabel?: string
 }
 
 const TRIGGER_STYLE: CSSProperties = {
@@ -56,6 +60,8 @@ export function ModelPicker({
   value,
   disabled = false,
   onChange,
+  style,
+  streamingLabel,
 }: ModelPickerProps) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
@@ -92,7 +98,10 @@ export function ModelPicker({
       if (event.key === 'Escape') setOpen(false)
     }
 
-    function close() {
+    function close(event?: Event) {
+      // 面板自身滚动（模型很多时）不应该把面板关掉
+      const target = event?.target
+      if (target instanceof Node && panelRef.current?.contains(target)) return
       setOpen(false)
     }
 
@@ -150,13 +159,17 @@ export function ModelPicker({
       : null
 
   return (
-    <div style={{ flex: '0 1 33%', minWidth: 0 }}>
+    <div style={{ flex: '0 1 33%', minWidth: 0, ...style }}>
       <button
         ref={triggerRef}
         type="button"
         onClick={toggle}
         disabled={disabled}
-        title={selected ? `${selected.name} · ${selected.model}` : t('picker.switchModel')}
+        title={
+          selected
+            ? [selected.name, selected.model, streamingLabel].filter(Boolean).join(' · ')
+            : t('picker.switchModel')
+        }
         aria-haspopup="listbox"
         aria-expanded={open}
         style={{
