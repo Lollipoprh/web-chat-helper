@@ -12,6 +12,7 @@ import {
   listBoundFiles,
   updateFileMeta,
 } from '../shared/file-handle-store'
+import { appendSessionArtifact } from '../shared/session-storage'
 
 /** 视为纯文本的扩展名白名单；其余格式拒绝读取，避免返回乱码给模型 */
 const TEXT_EXTENSIONS = new Set([
@@ -142,13 +143,16 @@ function sanitizeDownloadName(raw: string): string | null {
 }
 
 /** 把文本编码成 data URL；用 data URL 而不是 blob URL，避免下载期间 object URL 被回收 */
-function textToDataUrl(text: string): string {
+function textToDataUrl(text: string): { url: string; byteLength: number } {
   const bytes = new TextEncoder().encode(text)
   let binary = ''
   for (let index = 0; index < bytes.length; index += 1) {
     binary += String.fromCharCode(bytes[index])
   }
-  return `data:text/plain;charset=utf-8;base64,${btoa(binary)}`
+  return {
+    url: `data:text/plain;charset=utf-8;base64,${btoa(binary)}`,
+    byteLength: bytes.length,
+  }
 }
 
 /** 通过 chrome.downloads 写文件，无需用户手势 */
@@ -320,11 +324,23 @@ export function createFileTools(sessionId: string): AgentTool[] {
         }
 
         try {
-          const downloadId = await startDownload(textToDataUrl(content), safeName)
+          const { url, byteLength } = textToDataUrl(content)
+          const downloadId = await startDownload(url, safeName)
+          // 只在会话里记一条元数据；文件本体已经在下载目录，不重复存
+          try {
+            await appendSessionArtifact(sessionId, {
+              name: safeName,
+              downloadId,
+              bytes: byteLength,
+              createdAt: Date.now(),
+            })
+          } catch (error) {
+            console.warn('[file] 产物登记失败', error)
+          }
           return {
             ok: true,
-            data: { downloadId, filename: safeName, bytesWritten: content.length },
-            message: `已开始保存到下载目录：${safeName}（${content.length} 字节）`,
+            data: { downloadId, filename: safeName, bytesWritten: byteLength },
+            message: `已开始保存到下载目录：${safeName}（${byteLength} 字节）`,
           }
         } catch (error) {
           return {

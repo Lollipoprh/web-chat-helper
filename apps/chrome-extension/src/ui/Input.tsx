@@ -1,6 +1,7 @@
 import type {
   CSSProperties,
   InputHTMLAttributes,
+  Ref,
   TextareaHTMLAttributes,
 } from 'react'
 import { color, inputSize, type FieldSize } from './tokens'
@@ -56,6 +57,8 @@ export interface TextAreaProps
   block?: boolean
   /** 默认禁止手动拖拽缩放 */
   resize?: CSSProperties['resize']
+  /** 供自动增高一类逻辑直接操作底层 textarea */
+  ref?: Ref<HTMLTextAreaElement>
 }
 
 export function TextArea({
@@ -65,12 +68,14 @@ export function TextArea({
   resize = 'none',
   style,
   className,
+  ref,
   ...rest
 }: TextAreaProps) {
   const base = mergeStyle(controlBase(size, invalid, block), { resize })
   return (
     <textarea
       {...rest}
+      ref={ref}
       className={cx('ui-textarea', className)}
       style={mergeStyle(base, style)}
     />

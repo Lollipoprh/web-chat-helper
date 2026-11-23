@@ -45,11 +45,25 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 ## Side panel UI and chat interaction
 
 - Main UI: `apps/chrome-extension/src/sidepanel/App.tsx`
-- Header: title only plus a gear icon that opens Settings; the model name lives in the bottom `ModelPicker`
-- Usage meter: `apps/chrome-extension/src/sidepanel/components/UsageMeter.tsx` — cumulative input/output tokens and context window with a progress bar
+- Header (HUD): brand mark + session title, then rename / new / delete `IconButton`s, the run status pill (`sidepanel.statusRunning` / `statusAwaiting`, only while active) and the settings `IconButton`. The title is capped at `TITLE_MAX_WIDTH` so the action icons always fit
+- Session menu content: `apps/chrome-extension/src/sidepanel/components/SessionMenu.tsx` — search box (from five sessions up) and one row per session with switch + per-row delete on the right. Creating, renaming and deleting the active session live in the header; clearing is the `/clear` command and task records stay behind the right-edge pull tab
+- Session rename: `renameSession` in `apps/chrome-extension/src/shared/session-storage.ts` (deliberately leaves `updatedAt` alone so renaming does not reorder the list), driven by `renameDraft` state in `App.tsx` through the shared `Dialog` + `Input`
+- Session actions live in the header menu, not in a toolbar row — `apps/chrome-extension/src/ui/Menu.tsx` (`Dropdown`, `MenuItem`)
+- Composer: one-line `TextArea` that grows to `COMPOSER_MAX_HEIGHT`, then a control row with `ModelPicker`, the confirm/auto `Segmented`, the attach `IconButton` and send/stop
+- Context strip under the composer: current-page chip (turns `danger` and grants permission on click when `pendingPageOrigin` matches the tab), one removable chip per bound file, and the compact `UsageMeter`
+- Side-effect approval bar sits just above the composer (`pendingConfirmation`) so confirmations do not push the transcript
+- Chat and task-history panes overlap and slide with `transform` inside an `overflow: clip` container, and the off-screen pane is `inert`. Do not change that back to `overflow: hidden`: a hidden-but-scrollable container lets focus scroll the pane sideways, which pushes the chat off-screen to the left
+- Empty state (no provider / no messages) and loading rows use the shared `EmptyState` / `LoadingRow` primitives; when the active tab is an `http(s)` page the empty state offers three page-aware tasks (translate into the UI language / summarise / turn into a table) that send straight away. Suggestion text lives in `sidepanel.suggest*` in `apps/chrome-extension/src/shared/i18n.ts`
+- Usage meter: `apps/chrome-extension/src/sidepanel/components/UsageMeter.tsx` — compact bar + percentage, details on hover
 - System prompt and task policies: `apps/chrome-extension/src/sidepanel/App.tsx` (`SYSTEM_PROMPT`) — page translation defaults to in-place DOM edits unless the user asks for a chat reply
-- Task history: `apps/chrome-extension/src/sidepanel/TaskHistory.tsx`
-- Message bubble and tool-call card: `apps/chrome-extension/src/sidepanel/components/`
+- Task history: `apps/chrome-extension/src/sidepanel/TaskHistory.tsx` — reads only the active session (`listSessionTasks(sessionId)`), shows the session title in its header, drops stale results when the session is switched mid-read, and offers a `定位` action that jumps back to that run in the conversation (messages carry `id="run-<taskId>"`, see `runAnchorId` in `App.tsx`; only runs whose message still exists get the button)
+- Run block (one per assistant reply): `apps/chrome-extension/src/sidepanel/components/RunBlock.tsx` — collapsed shows status · step count · duration; expanding shows the step timeline. Uses live `toolEvents` while streaming and `listTaskSteps(taskId)` afterwards. The last reply also gets a `重新生成` action: `handleSend(..., { assistantId })` removes that answer (`deleteSessionMessage`) and re-runs the same user message without appending a duplicate
+- Interrupted-run recovery: the checkpoint banner offers `继续` (`handleResumeInterrupted` clears the checkpoint and sends `sidepanel.resumeTask` as a new turn in the same session, relying on the transcript plus the run ledger instead of replaying raw loop state) or `清除`
+- Reply-to-task link: `SessionMessageRecord.taskId` (`apps/chrome-extension/src/shared/session-storage.ts`) is written with the assistant message so the run block survives a reload; older records simply render without one
+- Task summaries for run blocks (step count / duration) are cached per session in `App.tsx` (`refreshSessionTasks` ← `listSessionTasks`)
+- Message bubble and message actions (copy / edit-and-resend): `apps/chrome-extension/src/sidepanel/components/MessageBubble.tsx` — assistant text renders through Markdown, user text stays plain with preserved newlines; actions appear on hover or keyboard focus
+- Markdown rendering: `apps/chrome-extension/src/ui/Markdown.tsx` (blocks + inline, fenced code with language label and copy, lists, quotes, rules, tables) on top of the pure parser in `apps/chrome-extension/src/ui/markdown-parse.ts`, unit-tested in `apps/chrome-extension/src/ui/markdown-parse.test.ts`. Rendering builds React elements only — never `innerHTML` — and links are limited to `http(s)` / `mailto`
+- Step row (used inside the run block): `apps/chrome-extension/src/sidepanel/components/ToolEventItem.tsx`
 
 ## Interface language (zh / en)
 
@@ -62,10 +76,33 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 
 ## UI components and design tokens
 
-- Design tokens (color, radius, font, spacing, control size): `apps/chrome-extension/src/ui/tokens.ts`
-- Shared primitives (Button, Input, TextArea, Select, Checkbox, Field, Alert, Card, Badge, PageHeader): `apps/chrome-extension/src/ui/`
+- Design tokens (numeric scales: radius, font size/weight, spacing, control size, shadow, motion, z-index, icon size): `apps/chrome-extension/src/ui/tokens.ts`
+- Color tokens are CSS variables, not literals: `apps/chrome-extension/src/ui/theme.css` (`--wc-*`) — light/dark via `light-dark()`, plus `:focus-visible` ring, `.ui-button` hover/active states, spinner and skeleton keyframes. `tokens.ts` only references `var(--wc-*)`, so every component is theme-aware without changes
+- Shared primitives: `apps/chrome-extension/src/ui/` — Button, IconButton, Icon, Input, TextArea, Select, Checkbox, Field, Alert, Card, Badge, Tooltip, Spinner/LoadingRow, Skeleton/SkeletonLines, EmptyState, Dialog, Dropdown/MenuItem, Segmented, Chip, Markdown
+- Wide layout: the content area measures itself with a `ResizeObserver` (state `contentWidth`, `WIDE_BREAKPOINT = 600` in `App.tsx`); from 600px up the task records stop sliding over the chat and sit in a permanent right column (`asideWidth` = 36% clamped to 280–340px), both pull tabs disappear, and `view` is reset to `chat` so shrinking the panel again does not leave the chat hidden
+- Command palette (`⌘K` on macOS, `Ctrl+K` elsewhere): `apps/chrome-extension/src/sidepanel/components/CommandPalette.tsx` — App builds the action list (sessions, `/` commands, providers, panel actions) and the palette only filters, moves the selection and runs one; it steps aside while a dialog is open and always closes before running, and the empty state prints the shortcut so the feature is discoverable
+- Hover hints all go through the shared `Tooltip` (`apps/chrome-extension/src/ui/Tooltip.tsx`), never the native `title`: it portals to the body, mounts only on first open, clamps itself to the viewport, flips to the other side when the preferred side has no room (so it never covers its own trigger) and keeps `aria-label` on the control as the accessible name
 - Component prop conventions and override rules: `apps/chrome-extension/src/ui/index.ts`
 - Settings-page layout styles: `apps/chrome-extension/src/options/styles.ts`
+
+## Brand assets
+
+- Extension icons (16/32/48/128, downscaled from the 1024px source artwork): `apps/chrome-extension/public/icons/`
+- Manifest declarations (`icons` + `action.default_icon`): `apps/chrome-extension/manifest.config.ts`
+- In-app brand mark (side panel header, settings sidebar) references `/icons/icon-48.png` from `apps/chrome-extension/src/sidepanel/App.tsx` and `apps/chrome-extension/src/options/App.tsx`; the settings tab favicon is set in `apps/chrome-extension/src/options/index.html`
+
+## Appearance and theme preference
+
+- Preference storage and DOM switch: `apps/chrome-extension/src/shared/theme.ts` (`ThemePref`, `UI_THEME_KEY`, `applyTheme`) — `auto` removes `<html data-theme>`, `light`/`dark` set it
+- React binding: `apps/chrome-extension/src/shared/useTheme.ts` (`useTheme` for the settings picker, `useApplyTheme` for pages that only need it applied) — module-level store + `chrome.storage.local` change listener + `matchMedia` listener
+- Theme picker (Settings → 通用 → 外观): `apps/chrome-extension/src/options/App.tsx` (`GeneralPanel`)
+- Entry stylesheet import (both pages): `apps/chrome-extension/src/sidepanel/main.tsx`, `apps/chrome-extension/src/options/main.tsx`
+
+## In-app confirmation dialog
+
+- Promise-based `confirm()` and the single `ConfirmHost`: `apps/chrome-extension/src/shared/confirm.tsx` — replaces every `window.confirm`, mounted next to `App` in both entry points
+- Dialog shell (scrim, Esc, focus trap, restore focus): `apps/chrome-extension/src/ui/Dialog.tsx`
+
 
 ## Sessions and task history storage
 
@@ -79,7 +116,11 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 
 - File handle storage: `apps/chrome-extension/src/shared/file-handle-store.ts` (`bindFile`, `bindFileHandle`, `listBoundFiles`, `unbindFile`, `deleteSessionFiles`) — key is `${session_id}::${name}` with a `by_sessionId` index; the v5 DB upgrade recreates the store and drops legacy global bindings (no migration)
 - File tools: `apps/chrome-extension/src/sidepanel/file-tools.ts` (`createFileTools(sessionId)`) — `list_bound_files` and every read/write are limited to files bound to the current session
-- Side Panel UI: file list sits above the composer, is hidden when empty, and the "Add file" button opens the system picker directly (no management panel); dropping files onto the chat panel or composer binds them to the current session through `DataTransferItem.getAsFileSystemHandle()`
+- Side Panel UI: bound files are chips in the context strip under the composer (hidden when none), and the attach icon opens the system picker directly; dropping files onto the chat panel or composer binds them to the current session through `DataTransferItem.getAsFileSystemHandle()`
+- File preview (first slice of the artifacts surface): `apps/chrome-extension/src/sidepanel/components/FilePreview.tsx` — clicking a file chip reads the bound handle, shows the first 200 lines / 12k characters in a dialog, and reports binary files or a revoked permission instead of failing silently
+- Session artifacts: `download_file` calls `appendSessionArtifact` (`apps/chrome-extension/src/shared/session-storage.ts`), so `SessionRecord.artifacts` keeps **metadata only** — name, byte count, `chrome.downloads` id and time, capped at 50 and de-duplicated by name. File content is never copied into IndexedDB; the file itself stays in the Downloads folder, which is what keeps history from growing with every export
+- Artifact list: `apps/chrome-extension/src/sidepanel/components/ArtifactList.tsx` — shown above the task records (both the wide right column and the slide-over) with a `显示` action that calls `chrome.downloads.show`, falling back to the Downloads folder when that download is gone
+- Display formatting shared by the panel and dialogs: `apps/chrome-extension/src/shared/format.ts` (`formatFileSize`, `formatDateTime`)
 
 ## Provider configuration: model, key, and URL
 
@@ -99,6 +140,8 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 
 - Types: `packages/agent-core/src/types.ts` (`ConfirmationRequest`, `AgentCheckpoint`)
 - Storage: `apps/chrome-extension/src/shared/checkpoint-storage.ts`
+- Recovery semantics: the checkpoint keeps the raw loop messages but the UI never replays them; resuming sends a continue instruction as a normal turn and the model reconstructs state from the transcript, the session memory ledger and the current page
+- Regenerate: `deleteSessionMessage` in `apps/chrome-extension/src/shared/session-storage.ts` removes a single reply (and adjusts `messageCount`) so the same prompt can run again without leaving two answers
 
 ## Context injection and built-in commands
 

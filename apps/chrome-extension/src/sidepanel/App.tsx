@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type DragEvent,
@@ -31,10 +32,12 @@ import {
   clearSessionMessages,
   createSession,
   deleteSession,
+  deleteSessionMessage,
   ensureSessions,
   getSession,
   listSessions,
   loadSessionMessages,
+  renameSession,
   saveSessionContextTokens,
   saveSessionDigest,
   setActiveSessionId as saveActiveSessionId,
@@ -57,6 +60,7 @@ import {
   pruneLogs,
   recordStep,
   recordTaskStart,
+  type LogTaskRecord,
   type LogTaskStatus,
 } from '../shared/step-log-storage'
 import {
@@ -78,9 +82,13 @@ import {
   setDefaultProvider,
 } from '../shared/storage'
 import TaskHistory from './TaskHistory'
+import { ArtifactList } from './components/ArtifactList'
+import { CommandPalette, type PaletteAction } from './components/CommandPalette'
+import { FilePreview } from './components/FilePreview'
 import { MessageBubble, type MessageStatus } from './components/MessageBubble'
 import { ModelPicker } from './components/ModelPicker'
-import { ToolEventItem } from './components/ToolEventItem'
+import { RunBlock } from './components/RunBlock'
+import { SessionMenu } from './components/SessionMenu'
 import { UsageMeter } from './components/UsageMeter'
 import { loadSessionMemory } from './memory-assembly'
 import {
@@ -89,7 +97,29 @@ import {
   runSlashCommand,
   type ParsedSlashCommand,
 } from './slash-commands'
-import { Alert, Button, Select, TextArea, color, fontSize, radius, space } from '../ui'
+import {
+  Alert,
+  Button,
+  Chip,
+  Dialog,
+  Dropdown,
+  EmptyState,
+  Icon,
+  IconButton,
+  Input,
+  LoadingRow,
+  Segmented,
+  TextArea,
+  Tooltip,
+  color,
+  fontSize,
+  fontWeight,
+  radius,
+  space,
+  zIndex,
+} from '../ui'
+import { confirm } from '../shared/confirm'
+import { useApplyTheme } from '../shared/useTheme'
 import {
   bindFile,
   bindFileHandle,
@@ -108,6 +138,15 @@ import {
 
 /** 右键菜单请求的有效期：超过后视为过期，避免下次打开面板时误触发 */
 const TRANSLATE_REQUEST_TTL_MS = 60_000
+
+/** 输入框自动增高的上限：约 6 行，再多就在框内滚动 */
+const COMPOSER_MAX_HEIGHT = 132
+
+/** 标题栏里会话标题的最大宽度：超出后省略，给右侧图标留位置 */
+const TITLE_MAX_WIDTH = 156
+
+/** 内容区宽度达到这个值就分成两列：左对话、右任务记录 */
+const WIDE_BREAKPOINT = 600
 
 /**
  * System prompt (English) —— concise, scope-locked.
@@ -137,12 +176,16 @@ interface UiMessage {
   error?: string
   /** 本轮助手回复中发生的工具调用，仅当前会话可见 */
   toolEvents?: AgentToolEvent[]
+  /** 该条回复对应的运行任务；刷新后据此从任务日志重建执行记录 */
+  taskId?: string
   /** 指令回执等仅存在于前端的提示，刷新即消失，且永不进入模型请求 */
   kind?: 'notice'
 }
 
 export default function App() {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
+  // 侧边栏只需要主题生效，不展示偏好值；系统主题变化由 CSS 的 light-dark() 处理
+  useApplyTheme()
   // 初始化 effect 只在挂载时跑一次：里面用到的 t 走 ref，避免切换语言时重跑并覆盖正在进行的会话
   const tRef = useRef(t)
   useEffect(() => {
@@ -179,10 +222,57 @@ export default function App() {
     toolTimeoutMs: number
     requestTimeoutMs: number
   } | null>(null)
-  // 折叠 / 展开的工具调用事件 id 集合
-  const [expandedToolEvents, setExpandedToolEvents] = useState<Set<string>>(
-    () => new Set(),
-  )
+  // 当前会话的任务摘要（taskId → 记录），给运行块提供步数与耗时
+  const [sessionTasks, setSessionTasks] = useState<Record<string, LogTaskRecord>>({})
+  // 重命名会话的草稿；非 null 表示对话框打开
+  const [renameDraft, setRenameDraft] = useState<string | null>(null)
+  // 刚从任务记录定位过来的运行：短暂高亮对应消息
+  const [focusedRunId, setFocusedRunId] = useState<string | null>(null)
+  // 正在预览的已绑定文件；非 null 时打开预览对话框
+  const [previewFile, setPreviewFile] = useState<BoundFileMeta | null>(null)
+  // 命令面板
+  const [paletteOpen, setPaletteOpen] = useState(false)
+
+  // ⌘K / Ctrl+K 开关命令面板；已有对话框时让位给对话框，避免浮层叠浮层
+  useEffect(() => {
+    // 这里的 KeyboardEvent 是全局事件类型（文件顶部的同名导入是 React 的合成事件）
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'k' || !(event.metaKey || event.ctrlKey)) return
+      if (event.altKey || event.shiftKey) return
+      if (renameDraft !== null || previewFile !== null) return
+      event.preventDefault()
+      setPaletteOpen((open) => !open)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [renameDraft, previewFile])
+
+  /** 平台对应的快捷键文案，用于空状态提示 */
+  const shortcutLabel = /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘K' : 'Ctrl+K'
+
+  // 宽栏检测：≥600px 时把任务记录固定在右列，窄栏保持滑出层
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const [contentWidth, setContentWidth] = useState(0)
+  useEffect(() => {
+    const element = contentRef.current
+    if (!element) return
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0
+      setContentWidth(Math.round(width))
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  const wide = contentWidth >= WIDE_BREAKPOINT
+  // 右列占比约 36%，并限制在 280–340px，避免窄宽下挤掉对话
+  const asideWidth = wide
+    ? Math.min(340, Math.max(280, Math.round(contentWidth * 0.36)))
+    : 0
+
+  // 变宽时任务记录已经常驻可见，把滑出层的状态收回对话，缩窄后不会停在历史上
+  useEffect(() => {
+    if (wide) setView('chat')
+  }, [wide])
   // 文件管理：当前会话绑定的本地文件列表
   const [boundFiles, setBoundFiles] = useState<BoundFileMeta[]>([])
   // 当前会话累计 token 用量，用于标题栏下方的用量条
@@ -197,9 +287,12 @@ export default function App() {
 
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
   const confirmResolverRef = useRef<((allowed: boolean) => void) | null>(null)
   // 当前活动标签页：发送任务时同步读取，用于绑定目标页并申请站点权限
   const activeTabRef = useRef<{ id?: number; url?: string } | null>(null)
+  // 同一份数据的可渲染副本：状态条上的「当前页面」胶囊需要随切页更新
+  const [activeTab, setActiveTab] = useState<{ title?: string; url?: string } | null>(null)
   // 右键菜单触发的整页翻译：待处理请求、去重集合与启动保护
   const [queuedTranslate, setQueuedTranslate] = useState<TranslatePageRequest | null>(null)
   const queuedTranslateRef = useRef<TranslatePageRequest | null>(null)
@@ -224,6 +317,18 @@ export default function App() {
       setSessions(await listSessions())
     } catch (error) {
       console.warn('[session] 读取会话列表失败', error)
+    }
+  }, [])
+
+  // 读取当前会话的任务摘要，供运行块展示「N 步 · X s」
+  const refreshSessionTasks = useCallback(async (sessionId: string) => {
+    try {
+      const records = await listSessionTasks(sessionId)
+      const map: Record<string, LogTaskRecord> = {}
+      for (const record of records) map[record.taskId] = record
+      setSessionTasks(map)
+    } catch (error) {
+      console.warn('[step-log] 读取任务摘要失败', error)
     }
   }, [])
 
@@ -265,6 +370,7 @@ export default function App() {
           outputTokens: active?.outputTokens ?? 0,
         })
         setContextTokens(recordedContextTokens(active))
+        void refreshSessionTasks(initial.activeSessionId)
         if (checkpoint) setInterruptedCheckpoint(checkpoint)
         setSkipConfirm(skip)
         setAgentLimits(limits)
@@ -312,6 +418,7 @@ export default function App() {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
         if (disposed) return
         activeTabRef.current = tab ? { id: tab.id, url: tab.url } : null
+        setActiveTab(tab ? { title: tab.title, url: tab.url } : null)
       } catch (error) {
         console.warn('[sidepanel] 读取活动标签页失败:', error)
       }
@@ -338,6 +445,14 @@ export default function App() {
     bottomRef.current?.scrollIntoView({ block: 'end' })
   }, [messages])
 
+  // 输入框随内容自动增高：空闲时只占一行，多行输入后再长到上限
+  useEffect(() => {
+    const element = composerRef.current
+    if (!element) return
+    element.style.height = 'auto'
+    element.style.height = `${Math.min(element.scrollHeight, COMPOSER_MAX_HEIGHT)}px`
+  }, [input])
+
   const openOptions = useCallback(() => {
     chrome.runtime.openOptionsPage()
   }, [])
@@ -363,7 +478,13 @@ export default function App() {
 
   const handleClear = useCallback(async () => {
     if (!activeSessionId || generating) return
-    if (!window.confirm(t('sidepanel.confirmClear'))) return
+    const confirmed = await confirm({
+      title: t('sidepanel.clearDialogTitle'),
+      message: t('sidepanel.confirmClear'),
+      confirmLabel: t('sidepanel.clearChat'),
+      confirmVariant: 'danger',
+    })
+    if (!confirmed) return
     abortRef.current?.abort()
     confirmResolverRef.current?.(false)
     confirmResolverRef.current = null
@@ -399,6 +520,7 @@ export default function App() {
           outputTokens: target?.outputTokens ?? 0,
         })
         setContextTokens(recordedContextTokens(target))
+        void refreshSessionTasks(sessionId)
         setActiveSessionId(sessionId)
         await saveActiveSessionId(sessionId)
       } catch (error) {
@@ -408,7 +530,7 @@ export default function App() {
         setHistoryLoaded(true)
       }
     },
-    [generating, historyLoaded, activeSessionId, sessions, t],
+    [generating, historyLoaded, activeSessionId, sessions, t, refreshSessionTasks],
   )
 
   const handleNewSession = useCallback(async () => {
@@ -432,42 +554,67 @@ export default function App() {
     }
   }, [generating, t])
 
-  const handleDeleteSession = useCallback(async () => {
-    if (generating || !activeSessionId) return
-    if (!window.confirm(t('sidepanel.confirmDeleteSession'))) return
-
-    setHistoryLoaded(false)
-    try {
-      await Promise.all([
-        deleteSession(activeSessionId),
-        deleteSessionFiles(activeSessionId),
-        deleteTasksForSession(activeSessionId),
-      ])
-      const remaining = sessions.filter((session) => session.sessionId !== activeSessionId)
-      const next = remaining.length > 0 ? remaining[0] : await createSession()
-      setSessions(remaining.length > 0 ? remaining : [next])
-      setActiveSessionId(next.sessionId)
-      await saveActiveSessionId(next.sessionId)
-      const [stored, files] = await Promise.all([
-        loadSessionMessages(next.sessionId),
-        listBoundFiles(next.sessionId),
-      ])
-      setMessages(stored.map(toUiMessage))
-      setBoundFiles(files)
-      setTokenUsage({
-        inputTokens: next.inputTokens ?? 0,
-        outputTokens: next.outputTokens ?? 0,
+  /**
+   * 删除会话。不传 id 表示删当前会话：删完切到下一个，没有就新建一个。
+   * 传入别的 id（会话列表行上的删除）只删那一条，不动当前会话。
+   */
+  const handleDeleteSession = useCallback(
+    async (targetId?: string) => {
+      const sessionId = targetId ?? activeSessionId
+      if (generating || !sessionId) return
+      const target = sessions.find((session) => session.sessionId === sessionId)
+      const confirmed = await confirm({
+        title: t('sidepanel.deleteDialogTitle'),
+        message: target?.title
+          ? t('sidepanel.confirmDeleteSessionNamed', { title: target.title })
+          : t('sidepanel.confirmDeleteSession'),
+        confirmLabel: t('sidepanel.deleteSession'),
+        confirmVariant: 'danger',
       })
-      setContextTokens(recordedContextTokens(next))
-      setView('chat')
-      setBanner(null)
-    } catch (error) {
-      console.warn('[session] 删除会话失败', error)
-      setBanner(t('sidepanel.deleteSessionFailed'))
-    } finally {
-      setHistoryLoaded(true)
-    }
-  }, [generating, activeSessionId, sessions, t])
+      if (!confirmed) return
+
+      const deletingActive = sessionId === activeSessionId
+      if (deletingActive) setHistoryLoaded(false)
+      try {
+        await Promise.all([
+          deleteSession(sessionId),
+          deleteSessionFiles(sessionId),
+          deleteTasksForSession(sessionId),
+        ])
+
+        if (!deletingActive) {
+          await refreshSessions()
+          return
+        }
+
+        const remaining = sessions.filter((session) => session.sessionId !== sessionId)
+        const next = remaining.length > 0 ? remaining[0] : await createSession()
+        setSessions(remaining.length > 0 ? remaining : [next])
+        setActiveSessionId(next.sessionId)
+        await saveActiveSessionId(next.sessionId)
+        const [stored, files] = await Promise.all([
+          loadSessionMessages(next.sessionId),
+          listBoundFiles(next.sessionId),
+        ])
+        setMessages(stored.map(toUiMessage))
+        setBoundFiles(files)
+        setTokenUsage({
+          inputTokens: next.inputTokens ?? 0,
+          outputTokens: next.outputTokens ?? 0,
+        })
+        setContextTokens(recordedContextTokens(next))
+        void refreshSessionTasks(next.sessionId)
+        setView('chat')
+        setBanner(null)
+      } catch (error) {
+        console.warn('[session] 删除会话失败', error)
+        setBanner(t('sidepanel.deleteSessionFailed'))
+      } finally {
+        if (deletingActive) setHistoryLoaded(true)
+      }
+    },
+    [generating, activeSessionId, sessions, t, refreshSessions, refreshSessionTasks],
+  )
 
   const handleConfirmAction = useCallback(() => {
     confirmResolverRef.current?.(true)
@@ -486,14 +633,57 @@ export default function App() {
     setInterruptedCheckpoint(null)
   }, [])
 
-  const toggleToolEvent = useCallback((eventId: string) => {
-    setExpandedToolEvents((prev) => {
-      const next = new Set(prev)
-      if (next.has(eventId)) next.delete(eventId)
-      else next.add(eventId)
-      return next
-    })
+  /** 把历史消息放回输入框，用户改完再发；不删除原有记录 */
+  const handleEditMessage = useCallback((text: string) => {
+    setInput(text)
+    composerRef.current?.focus()
   }, [])
+
+  /** 从任务记录定位到对话里的那次运行：切回对话、滚到消息、短暂高亮 */
+  const handleLocateRun = useCallback((taskId: string) => {
+    setView('chat')
+    setFocusedRunId(taskId)
+    // 等切回对话、布局恢复后再滚动
+    window.setTimeout(() => {
+      document
+        .getElementById(runAnchorId(taskId))
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 60)
+    window.setTimeout(() => setFocusedRunId(null), 2000)
+  }, [])
+
+  /** 重新生成：移除这条回答，用同一条用户消息重新跑一遍 */
+  const handleRegenerate = useCallback(
+    (assistantId: string) => {
+      if (generating) return
+      void handleSend(undefined, undefined, undefined, { assistantId })
+    },
+    // handleSend 是普通函数，依赖随渲染更新；这里只需要最新的 generating 与 messages
+    [generating, messages],
+  )
+
+  /** 继续上次被中断的任务：清掉检查点，把「继续」指令当作新一轮发送 */
+  const handleResumeInterrupted = useCallback(async () => {
+    if (generating) return
+    setInterruptedCheckpoint(null)
+    await clearAgentCheckpoint()
+    void handleSend(t('sidepanel.resumeTask'))
+  }, [generating, t])
+
+  /** 保存会话重命名：空标题直接忽略，失败时提示并保留对话框 */
+  const handleRenameSubmit = useCallback(async () => {
+    if (!activeSessionId || renameDraft === null) return
+    const title = renameDraft.trim()
+    if (!title) return
+    try {
+      await renameSession(activeSessionId, title)
+      setRenameDraft(null)
+      await refreshSessions()
+    } catch (error) {
+      console.warn('[session] 重命名失败', error)
+      setBanner(t('sidepanel.renameFailed'))
+    }
+  }, [activeSessionId, renameDraft, refreshSessions, t])
 
   /**
    * 全局豁免开关切换：
@@ -503,8 +693,12 @@ export default function App() {
   const handleToggleSkipConfirm = useCallback(async () => {
     const next = !skipConfirm
     if (next) {
-      const ok = window.confirm(t('sidepanel.skipConfirmWarning'))
-      if (!ok) return
+      const confirmed = await confirm({
+        title: t('sidepanel.autoModeDialogTitle'),
+        message: t('sidepanel.skipConfirmWarning'),
+        confirmVariant: 'danger',
+      })
+      if (!confirmed) return
     }
     await saveSkipConfirm(next)
     setSkipConfirm(next)
@@ -605,15 +799,40 @@ export default function App() {
     })
   }
 
+  /**
+   * 发送一轮任务。
+   * retry 存在时表示「重新生成」：沿用那条回答对应的用户消息，
+   * 把旧回答从会话里移除后重跑，不再追加一条重复的用户消息。
+   */
   async function handleSend(
     textOverride?: string,
     sessionOverride?: string,
     historyOverride?: UiMessage[],
+    retry?: { assistantId: string },
   ) {
-    const text = (textOverride ?? input).trim()
+    const retryIndex = retry
+      ? messages.findIndex((message) => message.id === retry.assistantId)
+      : -1
+    const retryAssistant = retryIndex >= 0 ? messages[retryIndex] : null
+    // 旧回答之前的最后一条用户消息：文字、落盘记录都复用它
+    let retryUser: UiMessage | null = null
+    if (retryAssistant) {
+      for (let index = retryIndex - 1; index >= 0; index -= 1) {
+        const candidate = messages[index]
+        if (candidate.role === 'user' && candidate.kind !== 'notice') {
+          retryUser = candidate
+          break
+        }
+      }
+    }
+
+    const text = (retryUser?.content ?? textOverride ?? input).trim()
     const sessionId = sessionOverride ?? activeSessionId
-    const priorMessages = historyOverride ?? messages
+    const priorMessages = retryUser
+      ? messages.slice(0, messages.findIndex((message) => message.id === retryUser!.id))
+      : (historyOverride ?? messages)
     if (!text || !sessionId) return
+    if (retry && !retryUser) return
 
     // 指令回执只存在于前端：刷新即消失，也不会被带进模型请求
     const pushNotice = (content: string) => {
@@ -800,17 +1019,22 @@ export default function App() {
     }
 
     const now = Date.now()
-    const userMessage: UiMessage = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: text,
-      status: 'complete',
-      createdAt: now,
-    }
+    const userMessage: UiMessage =
+      retryUser ??
+      {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: text,
+        status: 'complete',
+        createdAt: now,
+      }
+    // 任务 ID 在发送时确定，日志、检查点、会话消息共用，便于按任务检索
+    const taskId = crypto.randomUUID()
     const assistantId = crypto.randomUUID()
     const assistantMessage: UiMessage = {
       id: assistantId,
       role: 'assistant',
+      taskId,
       content: '',
       status: 'streaming',
       createdAt: now + 1,
@@ -828,12 +1052,25 @@ export default function App() {
       .filter((message) => message.status === 'complete' && message.content)
       .map((message) => ({ role: message.role, content: message.content }))
 
-    setMessages((prev) => [...prev, userMessage, assistantMessage])
+    setMessages((prev) => {
+      // 重新生成：先把旧回答摘掉，用户消息已经存在，不再追加
+      const base = retryAssistant
+        ? prev.filter((message) => message.id !== retryAssistant.id)
+        : [...prev, userMessage]
+      return [...base, assistantMessage]
+    })
     // 右键菜单自动触发的任务不清空用户正在输入的草稿
     if (textOverride === undefined) setInput('')
     setBanner(pageWarning)
     setPendingPageOrigin(null)
     setGenerating(true)
+
+    // 旧回答从会话存储里删掉，避免刷新后又出现一题两答
+    if (retryAssistant) {
+      void deleteSessionMessage(sessionId, retryAssistant.id)
+        .then(() => refreshSessions())
+        .catch((error: unknown) => console.warn('[session] 删除旧回答失败', error))
+    }
 
     // 先挂上取消句柄，让记忆装配期间点击停止也能生效
     const controller = new AbortController()
@@ -861,19 +1098,19 @@ export default function App() {
     ]
 
     // 用户消息立即落盘；助手消息等结束后一次性写入，流式中间态不入库
-    void appendSessionMessage(sessionId, {
-      id: userMessage.id,
-      sessionId,
-      role: 'user',
-      content: userMessage.content,
-      status: 'complete',
-      createdAt: userMessage.createdAt,
-    })
-      .then(() => refreshSessions())
-      .catch((error: unknown) => console.warn('[session] 用户消息落盘失败', error))
+    if (!retryUser) {
+      void appendSessionMessage(sessionId, {
+        id: userMessage.id,
+        sessionId,
+        role: 'user',
+        content: userMessage.content,
+        status: 'complete',
+        createdAt: userMessage.createdAt,
+      })
+        .then(() => refreshSessions())
+        .catch((error: unknown) => console.warn('[session] 用户消息落盘失败', error))
+    }
 
-    // 任务 ID 在发送时确定，日志、检查点与会话共用，便于按任务检索
-    const taskId = crypto.randomUUID()
     const taskStartPromise = recordTaskStart({
       taskId,
       sessionId,
@@ -1157,6 +1394,7 @@ export default function App() {
           status: assistantStatus,
           createdAt: assistantMessage.createdAt,
           error: assistantError,
+          taskId,
         })
           .then(() => refreshSessions())
           .catch((error: unknown) => console.warn('[session] 助手消息落盘失败', error))
@@ -1164,6 +1402,8 @@ export default function App() {
       // 等任务记录创建完成再写最终状态，避免读到尚未落盘的任务
       void taskStartPromise
         .then(() => finishTask(taskId, taskStatus, taskStopReason))
+        // 收尾后刷新任务摘要，运行块的「N 步 · X s」才能拿到最终值
+        .then(() => refreshSessionTasks(sessionId))
         // 清理放到下一个任务队列，避免拖慢界面收尾
         .then(() => setTimeout(() => void pruneLogs(), 0))
         .catch((error: unknown) => console.warn('[step-log] 任务收尾失败', error))
@@ -1352,6 +1592,102 @@ export default function App() {
   const canSend =
     Boolean(provider) && Boolean(activeSessionId) && input.trim().length > 0 && !generating
 
+  // —— 顶部 HUD / 底部上下文条所需的派生值
+  const activeSession = sessions.find((session) => session.sessionId === activeSessionId) ?? null
+  const statusLabel = pendingConfirmation
+    ? t('sidepanel.statusAwaiting')
+    : generating
+      ? t('sidepanel.statusRunning')
+      : null
+  const tabOrigin = activeTab?.url ? originPatternFromUrl(activeTab.url) : null
+  const tabHost = hostFromUrl(activeTab?.url)
+  // 工具回报未授权时，当前页正好是那个站点 —— 胶囊变成「点击授权」
+  const tabNeedsGrant = Boolean(pendingPageOrigin) && tabOrigin === pendingPageOrigin
+
+  // 空状态里的建议任务：只在当前页面可被工具操作（http/https）时出现
+  const pageSuggestions = useMemo(() => {
+    if (!provider || !tabOrigin) return []
+    const language = t(lang === 'zh' ? 'options.langZh' : 'options.langEn')
+    return [
+      {
+        key: 'translate',
+        label: t('sidepanel.suggestTranslate', { language }),
+        task: t('sidepanel.suggestTranslateTask', { language }),
+      },
+      {
+        key: 'summarize',
+        label: t('sidepanel.suggestSummarize'),
+        task: t('sidepanel.suggestSummarizeTask'),
+      },
+      {
+        key: 'table',
+        label: t('sidepanel.suggestTable'),
+        task: t('sidepanel.suggestTableTask'),
+      },
+    ]
+  }, [provider, tabOrigin, lang, t])
+
+  // 任务记录里哪些运行能在对话中定位（消息可能已被清空或来自更早版本）
+  const locatableTaskIds = useMemo(
+    () => new Set(messages.map((message) => message.taskId).filter(Boolean) as string[]),
+    [messages],
+  )
+
+  // 命令面板动作：每次渲染重建，保证其中的 handleSend / handleSwitchSession 用的是最新状态
+  const paletteActions: PaletteAction[] = [
+    ...sessions.map((session) => ({
+      id: `session:${session.sessionId}`,
+      group: t('palette.sessions'),
+      label: session.title || t('sidepanel.noSession'),
+      hint: t('palette.messageCount', { count: session.messageCount }),
+      icon: 'list' as const,
+      run: () => void handleSwitchSession(session.sessionId),
+    })),
+    ...SLASH_COMMANDS.map((command) => ({
+      id: `command:${command.name}`,
+      group: t('palette.commands'),
+      label: `${command.usage} · ${t(command.descriptionKey)}`,
+      icon: 'sliders' as const,
+      run: () => void handleSend(`/${command.name}`),
+    })),
+    ...providers.map((item) => ({
+      id: `model:${item.id}`,
+      group: t('palette.models'),
+      label: item.model,
+      hint: item.name,
+      icon: 'server' as const,
+      run: () => void handleProviderChange(item.id),
+    })),
+    {
+      id: 'action:new-session',
+      group: t('palette.other'),
+      label: t('palette.newSession'),
+      icon: 'plus',
+      run: () => void handleNewSession(),
+    },
+    {
+      id: 'action:rename',
+      group: t('palette.other'),
+      label: t('palette.rename'),
+      icon: 'pencil',
+      run: () => setRenameDraft(activeSession?.title ?? ''),
+    },
+    {
+      id: 'action:tasks',
+      group: t('palette.other'),
+      label: t('palette.openTasks'),
+      icon: 'monitor',
+      run: () => setView('history'),
+    },
+    {
+      id: 'action:settings',
+      group: t('palette.other'),
+      label: t('palette.openSettings'),
+      icon: 'settings',
+      run: openOptions,
+    },
+  ]
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <header
@@ -1360,83 +1696,118 @@ export default function App() {
           borderBottom: `1px solid ${color.border}`,
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: space.md,
+          flex: 'none',
         }}
       >
-        <div style={{ minWidth: 0, flex: 1, fontSize: 13, fontWeight: 600 }}>
-          Web Chat Helper
-        </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={openOptions}
-          title={t('common.settings')}
-          aria-label={t('common.settings')}
-          style={{
-            width: 26,
-            height: 26,
-            padding: 0,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <GearIcon />
-        </Button>
-      </header>
-
-      <div
-        style={{
-          padding: '8px 14px',
-          borderBottom: `1px solid ${color.border}`,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          flexWrap: 'wrap',
-        }}
-      >
-        <Select
-          value={activeSessionId ?? ''}
-          onChange={(event) => void handleSwitchSession(event.target.value)}
-          disabled={generating || !historyLoaded || sessions.length === 0}
-          title={t('sidepanel.switchSession')}
-          size="sm"
-          block={false}
-          options={sessions.map((session) => ({
-            value: session.sessionId,
-            label: `${session.title}（${session.messageCount}）`,
-          }))}
-          style={{ flex: '1 1 120px', minWidth: 0 }}
+        <img
+          src="/icons/icon-48.png"
+          alt=""
+          aria-hidden="true"
+          width={20}
+          height={20}
+          style={{ flex: 'none', display: 'block' }}
         />
-        <Button
-          size="sm"
-          onClick={() => void handleNewSession()}
-          disabled={generating}
-        >
-          {t('sidepanel.newSession')}
-        </Button>
-        <Button
-          size="sm"
-          onClick={() => void handleDeleteSession()}
-          disabled={generating || !activeSessionId}
-        >
-          {t('sidepanel.deleteSession')}
-        </Button>
-        <Button
-          size="sm"
-          onClick={handleClear}
-          disabled={generating || !activeSessionId}
-        >
-          {t('sidepanel.clearChat')}
-        </Button>
-      </div>
 
-      <UsageMeter
-        inputTokens={tokenUsage.inputTokens}
-        outputTokens={tokenUsage.outputTokens}
-        contextTokens={contextTokens}
-        contextWindow={provider?.contextWindow ?? DEFAULT_CONTEXT_WINDOW}
-      />
+        {/* 会话切换与增删改都收进标题菜单：侧栏宽度放不下一排并排按钮 */}
+        <Dropdown
+          triggerLabel={t('sidepanel.switchSession')}
+          width={272}
+          panelRole="dialog"
+          disabled={!historyLoaded}
+          triggerStyle={{ flex: '0 1 auto', minWidth: 0, maxWidth: TITLE_MAX_WIDTH, marginRight: 'auto' }}
+          label={
+            <>
+              <span
+                style={{
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontSize: fontSize.lg,
+                  fontWeight: fontWeight.semibold,
+                  color: color.text,
+                  lineHeight: 1.3,
+                }}
+              >
+                {activeSession?.title || t('sidepanel.noSession')}
+              </span>
+              <Icon name="chevron-down" size={12} style={{ color: color.textFaint }} />
+            </>
+          }
+        >
+          {(close) => (
+            <SessionMenu
+              sessions={sessions}
+              activeSessionId={activeSessionId}
+              generating={generating}
+              onSwitch={(sessionId) => void handleSwitchSession(sessionId)}
+              onDelete={(sessionId) => void handleDeleteSession(sessionId)}
+              close={close}
+            />
+          )}
+        </Dropdown>
+
+        {/* 重命名 / 新建 / 删除：从菜单提到标题右侧，菜单只留切换与逐条删除 */}
+        <IconButton
+          icon="pencil"
+          label={t('sidepanel.renameSession')}
+          size="sm"
+          disabled={generating || !activeSessionId}
+          onClick={() => setRenameDraft(activeSession?.title ?? '')}
+        />
+        <IconButton
+          icon="plus"
+          label={t('sidepanel.newSession')}
+          size="sm"
+          disabled={generating}
+          onClick={() => void handleNewSession()}
+        />
+        <IconButton
+          icon="trash"
+          label={t('sidepanel.deleteSessionAction')}
+          size="sm"
+          disabled={generating || !activeSessionId}
+          onClick={() => void handleDeleteSession()}
+        />
+
+        {statusLabel && (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: space.xs,
+              flex: 'none',
+              height: 22,
+              padding: `0 ${space.sm}px`,
+              borderRadius: radius.pill,
+              background: pendingConfirmation ? color.warningSoft : color.primarySoft,
+              color: pendingConfirmation ? color.warningText : color.primarySoftText,
+              fontSize: fontSize.xs,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: radius.pill,
+                background: 'currentColor',
+              }}
+            />
+            {statusLabel}
+          </span>
+        )}
+
+        <IconButton
+          icon="settings"
+          label={t('common.settings')}
+          size="sm"
+          variant="secondary"
+          onClick={openOptions}
+        />
+      </header>
 
       {banner && (
         <Alert tone="error" flush style={{ padding: '8px 14px' }}>
@@ -1446,7 +1817,7 @@ export default function App() {
               <Button
                 size="sm"
                 style={{
-                  background: color.danger,
+                  background: color.dangerSolid,
                   color: color.textInverse,
                   borderColor: 'transparent',
                 }}
@@ -1473,10 +1844,13 @@ export default function App() {
           <span style={{ flex: 1 }}>
             {t('sidepanel.checkpointNotice', { rounds: interruptedCheckpoint.rounds })}
           </span>
+          <Button size="sm" variant="primary" onClick={() => void handleResumeInterrupted()}>
+            {t('sidepanel.resume')}
+          </Button>
           <Button
             size="sm"
             style={{
-              background: color.warning,
+              background: color.warningSolid,
               color: color.textInverse,
               borderColor: 'transparent',
             }}
@@ -1487,125 +1861,138 @@ export default function App() {
         </Alert>
       )}
 
-      {pendingConfirmation && (
-        <Alert tone="warning" flush style={{ padding: '10px 14px' }}>
-          <div style={{ fontWeight: 600, marginBottom: space.sm }}>
-            {t('sidepanel.awaitingConfirmation')}
-            <span style={{ fontFamily: 'monospace' }}>{pendingConfirmation.toolName}</span>
-          </div>
-          <div
-            style={{
-              background: color.surface,
-              border: `1px solid ${color.warningBorder}`,
-              borderRadius: 4,
-              padding: '6px 8px',
-              marginBottom: space.md,
-              wordBreak: 'break-all',
-              color: color.textMuted,
-            }}
-          >
-            {pendingConfirmation.argsPreview}
-          </div>
-          <div style={{ display: 'flex', gap: space.md }}>
-            <Button
-              size="sm"
-              style={{
-                background: color.success,
-                color: color.textInverse,
-                borderColor: 'transparent',
-              }}
-              onClick={handleConfirmAction}
-            >
-              {t('sidepanel.run')}
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              style={{ color: color.warningText, borderColor: color.warningBorder }}
-              onClick={handleDenyAction}
-            >
-              {t('sidepanel.deny')}
-            </Button>
-          </div>
-        </Alert>
-      )}
-
-      {/* 内容区：对话栏与任务记录叠放在同一区域，用 transform 左右滑动切换 */}
-      <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
-        {/* 对话栏：默认显示，展开任务记录时整体向左滑出 */}
+      {/* 内容区：对话栏与任务记录叠放在同一区域，用 transform 左右滑动切换。
+          overflow 必须用 clip 而不是 hidden：hidden 仍是可滚动容器，
+          一旦有元素（例如滑到屏外的任务记录里的按钮）被聚焦，浏览器会把容器
+          横向滚走，整个对话就会被推到左侧、看起来「左边显示不全」。 */}
+      <div
+        ref={contentRef}
+        style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'clip' }}
+      >
+        {/* 对话栏：默认显示，展开任务记录时整体向左滑出（宽栏下两列并排，不滑动） */}
         <div
           onDragOver={handleFileDragOver}
           onDragLeave={handleFileDragLeave}
           onDrop={handleFileDrop}
+          // 滑出屏幕后不能再接收焦点，否则焦点会把容器滚走
+          inert={!wide && view === 'history'}
           style={{
             position: 'absolute',
-            inset: 0,
+            top: 0,
+            left: 0,
+            bottom: 0,
+            right: wide ? asideWidth : 0,
             display: 'flex',
             flexDirection: 'column',
             background: color.surface,
-            transform: view === 'history' ? 'translateX(-100%)' : 'translateX(0)',
+            transform: !wide && view === 'history' ? 'translateX(-100%)' : 'translateX(0)',
             transition: 'transform 240ms ease',
-            boxShadow: dragActive ? `inset 0 0 0 2px ${color.primary}` : undefined,
           }}
         >
           {/* 消息区单独成层，侧拉按钮以此为基准垂直居中，不因输入框而偏移 */}
           <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
-            <main style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
+            {/* overflow-x: clip —— 横向永不出现滚动条，避免长内容把消息列推歪 */}
+            <main style={{ flex: 1, overflowY: 'auto', overflowX: 'clip', padding: '12px 14px' }}>
               {loading ? (
-                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
-                  {t('common.loading')}
-                </p>
+                <LoadingRow label={t('common.loading')} />
               ) : !provider ? (
-                <div
-                  style={{ textAlign: 'center', color: color.textSecondary, marginTop: 40 }}
-                >
-                  <p style={{ margin: 0 }}>{t('sidepanel.noProviderTitle')}</p>
-                  <Button
-                    variant="primary"
-                    style={{ marginTop: space.lg }}
-                    onClick={openOptions}
-                  >
-                    {t('sidepanel.openSettings')}
-                  </Button>
-                </div>
+                <EmptyState
+                  icon="settings"
+                  title={t('sidepanel.noProviderTitle')}
+                  action={
+                    <Button variant="primary" onClick={openOptions}>
+                      {t('sidepanel.openSettings')}
+                    </Button>
+                  }
+                  style={{ marginTop: space.xxl }}
+                />
               ) : messages.length === 0 ? (
-                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
-                  {t('sidepanel.emptyChat')}
-                </p>
-              ) : (
-                messages.map((message) => (
+                <EmptyState
+                  icon="info"
+                  title={t('sidepanel.emptyChatTitle')}
+                  description={t('sidepanel.emptyChatHint')}
+                  action={
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: space.xs,
+                        width: '100%',
+                        maxWidth: 280,
+                      }}
+                    >
+                      {pageSuggestions.map((suggestion) => (
+                        <Button
+                          key={suggestion.key}
+                          variant="secondary"
+                          size="sm"
+                          disabled={generating || !provider}
+                          onClick={() => void handleSend(suggestion.task)}
+                          style={{
+                            justifyContent: 'flex-start',
+                            textAlign: 'left',
+                            whiteSpace: 'normal',
+                            lineHeight: 1.4,
+                            padding: '6px 10px',
+                            width: '100%',
+                          }}
+                        >
+                          {suggestion.label}
+                        </Button>
+                      ))}
+                      <span
+                        style={{
+                          marginTop: 2,
+                          fontSize: fontSize.xs,
+                          color: color.textFaint,
+                        }}
+                      >
+                        {t('palette.hint', { shortcut: shortcutLabel })}
+                      </span>
+                    </div>
+                  }
+                  style={{ marginTop: space.xxl }}
+                />
+              ) : (                messages.map((message, index) => (
                   <div
                     key={message.id}
+                    // 任务记录里「定位」据此滚动到这条回复
+                    id={message.taskId ? runAnchorId(message.taskId) : undefined}
                     style={{
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: message.role === 'user' ? 'flex-end' : 'flex-start',
                       marginBottom: 10,
+                      ...(focusedRunId && message.taskId === focusedRunId
+                        ? {
+                            outline: `2px solid ${color.primary}`,
+                            outlineOffset: 4,
+                            borderRadius: radius.md,
+                          }
+                        : null),
                     }}
                   >
-                    {/* 工具调用事件：默认收起显示名称/状态/耗时，点击展开参数与摘要，
-                        且排在回复文本之前 —— 用户先看到模型做了什么，再看到最终答复 */}
+                    {/* 一次运行一个块：折叠态是「状态 · 步数 · 耗时」，展开是步骤时间线。
+                        排在回复文本之前 —— 用户先看到模型做了什么，再看到最终答复 */}
                     {message.role === 'assistant' &&
-                      message.toolEvents &&
-                      message.toolEvents.length > 0 && (
-                        <div
-                          style={{
-                            maxWidth: '92%',
-                            width: '100%',
-                            marginBottom: 4,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 4,
-                          }}
-                        >
-                          {message.toolEvents.map((event) => (
-                            <ToolEventItem
-                              key={event.id}
-                              event={event}
-                              expanded={expandedToolEvents.has(event.id)}
-                              onToggle={() => toggleToolEvent(event.id)}
-                            />
-                          ))}
+                      (message.taskId || (message.toolEvents?.length ?? 0) > 0) && (
+                        <div style={{ maxWidth: '92%', width: '100%', marginBottom: space.xs }}>
+                          <RunBlock
+                            taskId={message.taskId}
+                            task={message.taskId ? sessionTasks[message.taskId] : undefined}
+                            events={message.toolEvents}
+                            streaming={message.status === 'streaming'}
+                            // 只有最后一条回答可以原地重新生成：更早的回答后面还有对话，
+                            // 重跑会静默丢掉那些消息
+                            onRetry={
+                              index === messages.length - 1 &&
+                              message.status !== 'streaming' &&
+                              !generating
+                                ? () => handleRegenerate(message.id)
+                                : undefined
+                            }
+                          />
                         </div>
                       )}
 
@@ -1632,6 +2019,7 @@ export default function App() {
                         content={message.content}
                         status={message.status}
                         error={message.error}
+                        onEdit={handleEditMessage}
                       />
                     )}
                   </div>
@@ -1639,99 +2027,96 @@ export default function App() {
               )}
               <div ref={bottomRef} />
             </main>
-            <PullTab
-              label={t('sidepanel.tasks')}
-              disabled={!activeSessionId}
-              onClick={() => setView('history')}
-            />
+            {/* 宽栏下任务记录已在右列常驻，侧拉按钮不再需要 */}
+            {!wide && (
+              <PullTab
+                label={t('sidepanel.tasks')}
+                disabled={!activeSessionId}
+                onClick={() => setView('history')}
+              />
+            )}
           </div>
 
           <footer style={{ padding: 10, borderTop: `1px solid ${color.border}` }}>
-            {dragActive && (
+            {/* 副作用动作审批：贴在输入区上方，出现时不打断消息流的位置 */}
+            {pendingConfirmation && (
               <div
+                role="group"
+                aria-label={t('sidepanel.awaitingConfirmation')}
                 style={{
-                  marginBottom: 6,
-                  padding: '4px 8px',
-                  borderRadius: radius.sm,
-                  background: color.surfaceSubtle,
-                  color: color.textSecondary,
-                  fontSize: fontSize.xs,
-                  textAlign: 'center',
+                  marginBottom: space.md,
+                  padding: '8px 10px',
+                  border: `1px solid ${color.warningBorder}`,
+                  borderRadius: radius.lg,
+                  background: color.warningSoft,
                 }}
               >
-                {t('sidepanel.dropToBind')}
-              </div>
-            )}
-            {/* 当前会话的文件列表：没有文件时整块隐藏 */}
-            {boundFiles.length > 0 && (
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 2,
-                  maxHeight: 96,
-                  overflowY: 'auto',
-                  marginBottom: 6,
-                }}
-              >
-                {boundFiles.map((file) => (
-                  <div
-                    key={file.name}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: space.sm,
-                      padding: '2px 6px',
-                      borderRadius: radius.sm,
-                      background: color.surfaceMuted,
-                      fontSize: fontSize.xs,
-                    }}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: space.sm,
+                    color: color.warningText,
+                    fontSize: fontSize.sm,
+                    fontWeight: fontWeight.medium,
+                  }}
+                >
+                  <Icon name="alert" size={14} style={{ flex: 'none' }} />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    {t('sidepanel.awaitingConfirmation')}
+                  </span>
+                  <span style={{ fontFamily: 'monospace', fontSize: fontSize.xs }}>
+                    {pendingConfirmation.toolName}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    margin: `${space.sm}px 0 ${space.md}px`,
+                    maxHeight: 72,
+                    overflowY: 'auto',
+                    padding: '4px 6px',
+                    border: `1px solid ${color.warningBorder}`,
+                    borderRadius: radius.sm,
+                    background: color.surface,
+                    color: color.textMuted,
+                    fontFamily: 'monospace',
+                    fontSize: fontSize.xs,
+                    lineHeight: 1.5,
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {pendingConfirmation.argsPreview}
+                </div>
+                <div style={{ display: 'flex', gap: space.md, justifyContent: 'flex-end' }}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    style={{ color: color.warningText, borderColor: color.warningBorder }}
+                    onClick={handleDenyAction}
                   >
-                    <span
-                      title={file.name}
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        color: color.textSecondary,
-                      }}
-                    >
-                      {file.name}
-                    </span>
-                    <span style={{ flex: 'none', color: color.textFaint }}>
-                      {formatFileSize(file.size)}
-                    </span>
-                    <button
-                      type="button"
-                      title={t('sidepanel.unbind')}
-                      aria-label={t('sidepanel.unbind')}
-                      onClick={() => void handleUnbindFile(file.name)}
-                      style={{
-                        flex: 'none',
-                        width: 16,
-                        height: 16,
-                        padding: 0,
-                        border: 'none',
-                        borderRadius: 3,
-                        background: 'transparent',
-                        color: color.textMuted,
-                        cursor: 'pointer',
-                        lineHeight: 1,
-                        fontFamily: 'inherit',
-                      }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
+                    {t('sidepanel.deny')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    style={{
+                      background: color.successSolid,
+                      color: color.textInverse,
+                      borderColor: 'transparent',
+                    }}
+                    onClick={handleConfirmAction}
+                  >
+                    {t('sidepanel.run')}
+                  </Button>
+                </div>
               </div>
             )}
+
             {/* 输入区整体容器：上方真实输入框，下方单独一行放模型选择、权限选择和发送按钮 */}
             <div
+              className="ui-composer"
               style={{
                 borderRadius: radius.lg,
+                border: `1px solid ${color.border}`,
                 background: provider ? color.surface : color.surfaceMuted,
                 overflow: 'hidden',
               }}
@@ -1799,6 +2184,7 @@ export default function App() {
                 </div>
               )}
               <TextArea
+                ref={composerRef}
                 value={input}
                 onChange={(event) => {
                   setInput(event.target.value)
@@ -1812,15 +2198,14 @@ export default function App() {
                     : t('sidepanel.inputPlaceholderNoProvider')
                 }
                 disabled={!provider || loading}
-                rows={3}
+                rows={1}
                 style={{
                   display: 'block',
                   border: 'none',
                   borderRadius: 0,
-                  outline: 'none',
                   background: 'transparent',
                   padding: '4px 8px',
-                  maxHeight: 140,
+                  maxHeight: COMPOSER_MAX_HEIGHT,
                   overflowY: 'auto',
                   lineHeight: 1.4,
                 }}
@@ -1840,84 +2225,66 @@ export default function App() {
                     value={provider?.id ?? ''}
                     disabled={generating}
                     onChange={handleProviderChange}
+                    style={{ flex: '1 1 auto', minWidth: 0 }}
+                    streamingLabel={
+                      provider
+                        ? provider.supportsStreaming
+                          ? t('sidepanel.streaming')
+                          : t('sidepanel.nonStreaming')
+                        : undefined
+                    }
                   />
                 ) : (
-                  <span style={{ flex: 1, fontSize: 11, color: color.textFaint }}>
+                  <span style={{ flex: 1, fontSize: fontSize.xs, color: color.textFaint }}>
                     {t('sidepanel.noProvider')}
                   </span>
                 )}
-                <Select
-                  size="sm"
-                  block={false}
+
+                <Segmented
+                  ariaLabel={t('sidepanel.autoModeOffTitle')}
                   value={skipConfirm ? 'skip' : 'confirm'}
-                  onChange={(event) => {
-                    if ((event.target.value === 'skip') === skipConfirm) return
+                  onChange={(next) => {
+                    if ((next === 'skip') === skipConfirm) return
                     void handleToggleSkipConfirm()
                   }}
-                  title={
-                    skipConfirm
-                      ? t('sidepanel.autoModeOnTitle')
-                      : t('sidepanel.autoModeOffTitle')
-                  }
                   options={[
-                    { value: 'confirm', label: t('sidepanel.confirmMode') },
-                    { value: 'skip', label: t('sidepanel.autoMode') },
+                    {
+                      value: 'confirm',
+                      label: t('sidepanel.confirmMode'),
+                      title: t('sidepanel.autoModeOffTitle'),
+                    },
+                    {
+                      value: 'skip',
+                      label: t('sidepanel.autoMode'),
+                      title: t('sidepanel.autoModeOnTitle'),
+                    },
                   ]}
-                  style={{
-                    flex: 'none',
-                    width: 96,
-                    minWidth: 0,
-                    border: 'none',
-                    appearance: 'none',
-                    background: color.surfaceSubtle,
-                    color: skipConfirm ? color.warning : color.textSecondary,
-                  }}
                 />
-                {provider && (
-                  <span
-                    style={{
-                      flex: 'none',
-                      fontSize: 11,
-                      color: color.textFaint,
-                    }}
-                  >
-                    {provider.supportsStreaming
-                      ? t('sidepanel.streaming')
-                      : t('sidepanel.nonStreaming')}
-                  </span>
-                )}
+
                 {generating ? (
                   <Button
                     size="sm"
                     variant="danger"
-                    style={{ marginLeft: 'auto', flex: 'none' }}
+                    style={{ flex: 'none' }}
                     onClick={handleStop}
                   >
                     {t('sidepanel.stop')}
                   </Button>
                 ) : (
                   <>
-                    <Button
+                    <IconButton
+                      icon="paperclip"
+                      label={t('sidepanel.addFile')}
                       size="sm"
-                      style={{
-                        marginLeft: 'auto',
-                        flex: 'none',
-                        border: 'none',
-                        borderRadius: radius.sm,
-                        background: color.surfaceSubtle,
-                        color: activeSessionId ? color.textSecondary : color.textFaint,
-                        padding: '4px 8px',
-                        fontSize: fontSize.sm,
-                        lineHeight: 1.5,
-                      }}
+                      variant="text"
                       disabled={!activeSessionId}
                       onClick={() => void handleAddFile()}
-                    >
-                      {t('sidepanel.addFile')}
-                    </Button>
+                      style={{ flex: 'none' }}
+                    />
                     <Button
                       size="sm"
                       variant="primary"
+                      style={{ flex: 'none' }}
                       disabled={!canSend}
                       onClick={() => void handleSend()}
                     >
@@ -1927,46 +2294,210 @@ export default function App() {
                 )}
               </div>
             </div>
+
+            {/* 状态条：上下文（当前页面 / 已绑定文件）在左，上下文用量在右 */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: space.sm,
+                paddingTop: space.sm,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  gap: space.xs,
+                  flex: 1,
+                  minWidth: 0,
+                  maxHeight: 52,
+                  overflowY: 'auto',
+                }}
+              >
+                {tabHost ? (
+                  <Chip
+                    icon={tabNeedsGrant ? 'alert' : 'globe'}
+                    tone={tabNeedsGrant ? 'danger' : 'neutral'}
+                    label={tabHost}
+                    title={
+                      tabNeedsGrant
+                        ? `${t('sidepanel.grantSite')} · ${tabHost}`
+                        : `${activeTab?.title ?? tabHost}\n${activeTab?.url ?? ''}`
+                    }
+                    onClick={tabNeedsGrant ? () => void handleGrantPagePermission() : undefined}
+                  />
+                ) : null}
+
+                {boundFiles.map((file) => (
+                  <Chip
+                    key={file.name}
+                    icon="file"
+                    label={file.name}
+                    title={t('file.previewTitle', { name: file.name })}
+                    onClick={() => setPreviewFile(file)}
+                    onRemove={() => void handleUnbindFile(file.name)}
+                    removeLabel={t('sidepanel.unbind')}
+                  />
+                ))}
+              </div>
+
+              <UsageMeter
+                inputTokens={tokenUsage.inputTokens}
+                outputTokens={tokenUsage.outputTokens}
+                contextTokens={contextTokens}
+                contextWindow={provider?.contextWindow ?? DEFAULT_CONTEXT_WINDOW}
+              />
+            </div>
           </footer>
+
+          {/* 拖拽文件时用灰色蒙版覆盖对话区和输入框，中心提示松开绑定 */}
+          {dragActive && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: zIndex.overlay,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: space.xl,
+                background: color.overlay,
+                backdropFilter: 'blur(3px)',
+                WebkitBackdropFilter: 'blur(3px)',
+                pointerEvents: 'none',
+              }}
+            >
+              <div
+                style={{
+                  padding: '10px 16px',
+                  background: color.surface,
+                  border: `1px dashed ${color.primary}`,
+                  borderRadius: radius.md,
+                  color: color.primary,
+                  fontSize: fontSize.md,
+                  fontWeight: fontWeight.semibold,
+                  textAlign: 'center',
+                }}
+              >
+                {t('sidepanel.dropToBind')}
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* 任务记录：点击侧拉按钮时从右侧滑入 */}
+        {/* 任务记录：窄栏时点击侧拉按钮从右侧滑入；宽栏时固定在右列常驻 */}
         <aside
+          // 滑到屏外时不参与焦点顺序与命中测试
+          inert={!wide && view !== 'history'}
           style={{
             position: 'absolute',
-            inset: 0,
+            top: 0,
+            bottom: 0,
+            ...(wide ? { right: 0, width: asideWidth } : { left: 0, right: 0 }),
             display: 'flex',
             flexDirection: 'column',
             background: color.surface,
-            transform: view === 'history' ? 'translateX(0)' : 'translateX(100%)',
+            borderLeft: wide ? `1px solid ${color.border}` : 'none',
+            transform: wide || view === 'history' ? 'translateX(0)' : 'translateX(100%)',
             transition: 'transform 240ms ease',
           }}
         >
           <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
             {/* 右侧留出侧拉按钮的宽度，避免列表内容与按钮边框重叠 */}
-            <main style={{ flex: 1, overflowY: 'auto', padding: '12px 32px 12px 14px' }}>
+            <main
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                overflowX: 'clip',
+                padding: wide ? '12px 14px' : '12px 32px 12px 14px',
+              }}
+            >
               {activeSessionId ? (
-                <TaskHistory sessionId={activeSessionId} />
+                <>
+                  <ArtifactList artifacts={activeSession?.artifacts ?? []} />
+                  <TaskHistory
+                    sessionId={activeSessionId}
+                    sessionTitle={activeSession?.title}
+                    locatableTaskIds={locatableTaskIds}
+                    onLocate={handleLocateRun}
+                  />
+                </>
               ) : (
                 <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
                   {t('sidepanel.noSession')}
                 </p>
               )}
             </main>
-            <PullTab
-              label={t('sidepanel.backToChat')}
-              disabled={!activeSessionId}
-              onClick={() => setView('chat')}
-            />
+            {!wide && (
+              <PullTab
+                label={t('sidepanel.backToChat')}
+                disabled={!activeSessionId}
+                onClick={() => setView('chat')}
+              />
+            )}
           </div>
         </aside>
       </div>
+
+      {/* 重命名会话：只有标题一个输入，回车即保存 */}
+      <Dialog
+        open={renameDraft !== null}
+        title={t('sidepanel.renameTitle')}
+        closeLabel={t('common.close')}
+        onClose={() => setRenameDraft(null)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRenameDraft(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={!renameDraft?.trim()}
+              onClick={() => void handleRenameSubmit()}
+            >
+              {t('common.save')}
+            </Button>
+          </>
+        }
+      >
+        <Input
+          autoFocus
+          value={renameDraft ?? ''}
+          maxLength={60}
+          placeholder={t('sidepanel.renamePlaceholder')}
+          aria-label={t('sidepanel.renameTitle')}
+          onChange={(event) => setRenameDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') return
+            event.preventDefault()
+            void handleRenameSubmit()
+          }}
+        />
+      </Dialog>
+
+      {/* 已绑定文件的只读预览：产物面板的第一期 */}
+      {activeSessionId && (
+        <FilePreview
+          sessionId={activeSessionId}
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
+        />
+      )}
+
+      <CommandPalette
+        open={paletteOpen}
+        actions={paletteActions}
+        onClose={() => setPaletteOpen(false)}
+      />
     </div>
   )
 }
 
 /**
  * 侧拉按钮：始终贴在内容区右边缘，距顶部的固定偏移量保证两个视图位置的上下一致。
+ * 命中区放大到 24×60（原先 16×56 低于 WCAG 2.5.8 的最小 24px），图形改用图标而非 ‹ 字符。
  */
 function PullTab({
   label,
@@ -1978,61 +2509,50 @@ function PullTab({
   onClick: () => void
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      aria-label={label}
+    // 定位放在 Tooltip 外层，按钮自身保持静态，避免 absolute 相对错误容器定位
+    <Tooltip
+      content={label}
+      placement="bottom"
       style={{
         position: 'absolute',
         top: 100,
         right: 0,
-        zIndex: 5,
-        width: 16,
-        height: 56,
-        padding: 0,
-        borderTop: `1px solid ${color.border}`,
-        borderBottom: `1px solid ${color.border}`,
-        borderLeft: `1px solid ${color.border}`,
-        borderRight: 'none',
-        borderRadius: '6px 0 0 6px',
-        background: color.surfaceMuted,
-        color: disabled ? color.textFaint : color.textMuted,
-        fontFamily: 'inherit',
-        fontSize: 12,
-        lineHeight: 1,
-        cursor: disabled ? 'not-allowed' : 'pointer',
+        zIndex: zIndex.pullTab,
+        display: 'block',
       }}
     >
-      ‹
-    </button>
+      <button
+        type="button"
+        className="ui-pull-tab"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+        style={{
+          width: 24,
+          height: 60,
+          padding: 0,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderTop: `1px solid ${color.border}`,
+          borderBottom: `1px solid ${color.border}`,
+          borderLeft: `1px solid ${color.border}`,
+          borderRight: 'none',
+          borderRadius: `${radius.md}px 0 0 ${radius.md}px`,
+          background: color.surfaceMuted,
+          color: disabled ? color.textFaint : color.textMuted,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+        }}
+      >
+        <Icon name="chevron-left" size={14} />
+      </button>
+    </Tooltip>
   )
 }
 
 function describeError(error: unknown): string {
   if (error instanceof LLMError) return error.message
   return error instanceof Error ? error.message : String(error)
-}
-
-/** 标题栏设置按钮的齿轮图标，避免引入图标依赖 */
-function GearIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.35a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.65 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.64h.01A1.7 1.7 0 0 0 10.04 3.08V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.07 4.65a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 9v.01A1.7 1.7 0 0 0 20.92 10.04H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15z" />
-    </svg>
-  )
 }
 
 /** 拖拽内容是否包含文件 */
@@ -2056,10 +2576,19 @@ function readDroppedFileHandle(item: DataTransferItem): Promise<FileSystemFileHa
     .catch(() => null)
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+/** 状态条上展示的主机名；URL 解析失败时退回原串，不隐藏信息 */
+function hostFromUrl(url?: string): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+/** 运行块/任务记录共用的消息锚点 id */
+function runAnchorId(taskId: string): string {
+  return `run-${taskId}`
 }
 
 function toUiMessage(record: SessionMessageRecord): UiMessage {
@@ -2070,6 +2599,7 @@ function toUiMessage(record: SessionMessageRecord): UiMessage {
     status: record.status,
     createdAt: record.createdAt,
     error: record.error,
+    taskId: record.taskId,
     kind: record.kind,
   }
 }

@@ -1,7 +1,7 @@
 // 当前会话的任务记录：按会话读取 IndexedDB 中的任务，展开查看每一步工具调用。
 // 只展示已落盘的脱敏摘要，不读取页面内容。
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   listSessionTasks,
   listTaskSteps,
@@ -9,12 +9,32 @@ import {
   type LogTaskRecord,
   type LogTaskStatus,
 } from '../shared/step-log-storage'
-import { Badge, Button, Card, color, fontSize, radius, space, type BadgeTone } from '../ui'
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  LoadingRow,
+  SkeletonLines,
+  Tooltip,
+  color,
+  fontSize,
+  radius,
+  space,
+  type BadgeTone,
+} from '../ui'
 import type { MessageKey } from '../shared/i18n'
 import { useI18n } from '../shared/useI18n'
 
 interface TaskHistoryProps {
+  /** 只读取这个会话的任务 */
   sessionId: string
+  /** 会话标题，用于在列表头部标明作用范围 */
+  sessionTitle?: string
+  /** 能在对话里定位到的任务（对应消息仍在当前会话里） */
+  locatableTaskIds?: Set<string>
+  /** 点击「定位」后切回对话并滚动到那次运行 */
+  onLocate?: (taskId: string) => void
 }
 
 interface StepView {
@@ -40,21 +60,32 @@ const STATUS_TONES: Record<LogTaskStatus, BadgeTone> = {
   round_limit: 'warning',
 }
 
-export default function TaskHistory({ sessionId }: TaskHistoryProps) {
+export default function TaskHistory({
+  sessionId,
+  sessionTitle,
+  locatableTaskIds,
+  onLocate,
+}: TaskHistoryProps) {
   const { t } = useI18n()
   const [tasks, setTasks] = useState<LogTaskRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
   const [stepView, setStepView] = useState<StepView | null>(null)
+  // 会话切换时可能有多个读取在飞：只接受最后一次请求的结果，避免串到别的会话
+  const requestRef = useRef(0)
 
   const loadTasks = useCallback(async () => {
+    const requestId = requestRef.current + 1
+    requestRef.current = requestId
     setLoading(true)
     try {
-      setTasks(await listSessionTasks(sessionId))
+      const next = await listSessionTasks(sessionId)
+      if (requestRef.current !== requestId) return
+      setTasks(next)
     } catch (error) {
       console.warn('[history] 读取任务记录失败', error)
     } finally {
-      setLoading(false)
+      if (requestRef.current === requestId) setLoading(false)
     }
   }, [sessionId])
 
@@ -84,17 +115,33 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
 
   return (
     <div style={{ fontSize: fontSize.sm }}>
+      {/* 头部先标明作用范围：这份列表只属于当前会话 */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: space.md,
-          marginBottom: 10,
+          marginBottom: 4,
         }}
       >
-        <div style={{ flex: 1, color: color.textMuted }}>
-          {t('history.summary', { count: tasks.length })}
-        </div>
+        <Tooltip
+          content={sessionTitle?.trim() ? sessionTitle : t('sidepanel.noSession')}
+          style={{ flex: 1, minWidth: 0, display: 'block' }}
+        >
+          <span
+            style={{
+              display: 'block',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              color: color.textSecondary,
+            }}
+          >
+            {t('history.sessionLabel', {
+              title: sessionTitle?.trim() ? sessionTitle : t('sidepanel.noSession'),
+            })}
+          </span>
+        </Tooltip>
         <Button
           size="xs"
           variant="secondary"
@@ -105,10 +152,20 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
         </Button>
       </div>
 
+      <div
+        style={{
+          color: color.textFaint,
+          fontSize: fontSize.xs,
+          marginBottom: 10,
+        }}
+      >
+        {t('history.summary', { count: tasks.length })}
+      </div>
+
       {loading ? (
-        <p style={{ color: color.textFaint }}>{t('common.loading')}</p>
+        <SkeletonLines lines={3} />
       ) : tasks.length === 0 ? (
-        <p style={{ color: color.textFaint }}>{t('history.empty')}</p>
+        <EmptyState compact icon="list" description={t('history.empty')} />
       ) : (
         tasks.map((task) => (
           <Card
@@ -127,35 +184,54 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: space.md,
+                  // 窄列（宽栏右列）里放不下一行时整体换行，而不是把时间挤成两行
+                  flexWrap: 'wrap',
+                  columnGap: space.md,
+                  rowGap: 4,
                   marginBottom: space.xs,
                 }}
               >
-                <Badge tone={STATUS_TONES[task.status]} style={{ marginLeft: 0 }}>
+                <Badge tone={STATUS_TONES[task.status]}>
                   {t(STATUS_LABELS[task.status])}
                 </Badge>
-                <span style={{ color: color.textFaint }}>{formatTime(task.createdAt)}</span>
-                <span style={{ color: color.textFaint, marginLeft: 'auto' }}>
+                <span style={{ color: color.textFaint, whiteSpace: 'nowrap' }}>
+                  {formatTime(task.createdAt)}
+                </span>
+                <span style={{ color: color.textFaint, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
                   {t('history.roundsSteps', { rounds: task.rounds, steps: task.stepCount })}
                   {task.droppedSteps > 0
                     ? t('history.dropped', { count: task.droppedSteps })
                     : ''}
                 </span>
+                {/* 运行块已经展示步骤细节，这里只需要能跳回那次运行 */}
+                {onLocate && locatableTaskIds?.has(task.taskId) && (
+                  <Button
+                    size="xs"
+                    variant="text"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onLocate(task.taskId)
+                    }}
+                    style={{ flex: 'none', color: color.primarySoftText, padding: '0 4px' }}
+                  >
+                    {t('history.locate')}
+                  </Button>
+                )}
               </div>
               <div style={{ color: color.text, wordBreak: 'break-word' }}>{task.goal}</div>
               {task.tabUrl && (
-                <div
-                  style={{
-                    color: color.textFaint,
-                    marginTop: 2,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                  title={task.tabUrl}
-                >
-                  {task.tabUrl}
-                </div>
+                <Tooltip content={task.tabUrl} style={{ display: 'block', marginTop: 2 }}>
+                  <div
+                    style={{
+                      color: color.textFaint,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {task.tabUrl}
+                  </div>
+                </Tooltip>
               )}
               {task.stopReason && task.stopReason !== 'completed' && (
                 <div style={{ color: color.textFaint, marginTop: 2 }}>
@@ -174,7 +250,7 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
               >
                 {stepView?.taskId === task.taskId ? (
                   stepView.steps === null ? (
-                    <span style={{ color: color.textFaint }}>{t('history.readingSteps')}</span>
+                    <LoadingRow label={t('history.readingSteps')} />
                   ) : stepView.steps.length === 0 ? (
                     <span style={{ color: color.textFaint }}>{t('history.noSteps')}</span>
                   ) : (

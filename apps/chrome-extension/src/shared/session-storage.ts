@@ -42,7 +42,27 @@ export interface SessionRecord {
   digestThroughMessageId?: string
   /** 当前上下文的估算 token 占用；/compact 后立即下降，用于进度条 */
   contextTokens?: number
+  /** 本会话产出的文件（只存元数据，最新的在后面） */
+  artifacts?: SessionArtifact[]
 }
+
+/**
+ * 会话产物的描述信息。
+ * 只存文件名、大小、下载任务 id 与时间，**不存内容**：
+ * 文件本体已经在系统下载目录里，重复保存只会白占存储。
+ */
+export interface SessionArtifact {
+  /** 相对下载目录的路径，例如 notes/todo.md */
+  name: string
+  /** chrome.downloads 的任务 id，用于「在文件夹中显示」 */
+  downloadId?: number
+  /** 写入的字节数 */
+  bytes?: number
+  createdAt: number
+}
+
+/** 每个会话最多保留的产物条数：只存元数据，但仍要防止无限增长 */
+const ARTIFACT_LIMIT = 50
 
 export interface SessionMessageRecord {
   id: string
@@ -54,6 +74,11 @@ export interface SessionMessageRecord {
   error?: string
   /** 指令回执卡片；持久化并在界面展示，但永不进入模型请求 */
   kind?: 'notice'
+  /**
+   * 这条助手回复对应的运行任务 id。
+   * 用来在刷新后从任务日志里重新装配「执行记录」，旧记录没有该字段。
+   */
+  taskId?: string
 }
 
 /** 新建空白会话 */
@@ -135,9 +160,70 @@ export async function appendSessionMessage(
   await txDone(tx)
 }
 
-/** 清空会话消息但保留会话本身 */
-export async function clearSessionMessages(sessionId: string): Promise<void> {
+/**
+ * 删除单条消息并同步消息计数。
+ * 目前只用于「重新生成」：把上一次的回答从会话里去掉，再重跑同一个问题。
+ */
+export async function deleteSessionMessage(
+  sessionId: string,
+  messageId: string,
+): Promise<void> {
   const db = await openLocalDb()
+  const tx = db.transaction([SESSION_STORE, MESSAGE_STORE], 'readwrite')
+  const sessionStore = tx.objectStore(SESSION_STORE)
+  const messageStore = tx.objectStore(MESSAGE_STORE)
+
+  const session = await requestResult<SessionRecord | undefined>(
+    sessionStore.get(sessionId) as IDBRequest<SessionRecord | undefined>,
+  )
+  const existing = await requestResult<SessionMessageRecord | undefined>(
+    messageStore.get(messageId) as IDBRequest<SessionMessageRecord | undefined>,
+  )
+  if (!existing) {
+    await txDone(tx)
+    return
+  }
+
+  messageStore.delete(messageId)
+  if (session) {
+    sessionStore.put({
+      ...session,
+      messageCount: Math.max(0, session.messageCount - 1),
+    })
+  }
+  await txDone(tx)
+}
+
+/**
+ * 追加一条会话产物（只存元数据）。
+ * 不动 updatedAt：产物是某轮任务的副产品，不该把会话顶到列表最前。
+ * 同名产物保留最后一条，避免「覆盖保存」时列表里堆一串同名文件。
+ */
+export async function appendSessionArtifact(
+  sessionId: string,
+  artifact: SessionArtifact,
+): Promise<void> {
+  const db = await openLocalDb()
+  const tx = db.transaction(SESSION_STORE, 'readwrite')
+  const store = tx.objectStore(SESSION_STORE)
+  const session = await requestResult<SessionRecord | undefined>(
+    store.get(sessionId) as IDBRequest<SessionRecord | undefined>,
+  )
+  if (!session) {
+    await txDone(tx)
+    return
+  }
+
+  const previous = (session.artifacts ?? []).filter((item) => item.name !== artifact.name)
+  store.put({
+    ...session,
+    artifacts: [...previous, artifact].slice(-ARTIFACT_LIMIT),
+  })
+  await txDone(tx)
+}
+
+/** 清空会话消息但保留会话本身 */
+export async function clearSessionMessages(sessionId: string): Promise<void> {  const db = await openLocalDb()
   const tx = db.transaction([SESSION_STORE, MESSAGE_STORE], 'readwrite')
   const sessionStore = tx.objectStore(SESSION_STORE)
 
@@ -208,6 +294,23 @@ export async function getSession(sessionId: string): Promise<SessionRecord | nul
     tx.objectStore(SESSION_STORE).get(sessionId) as IDBRequest<SessionRecord | undefined>,
   )
   return record ?? null
+}
+
+/**
+ * 重命名会话。
+ * 刻意不动 updatedAt：改名是元数据操作，不应该把这个会话顶到列表最前面。
+ */
+export async function renameSession(sessionId: string, title: string): Promise<void> {
+  const trimmed = title.trim()
+  if (!trimmed) return
+  const db = await openLocalDb()
+  const tx = db.transaction(SESSION_STORE, 'readwrite')
+  const store = tx.objectStore(SESSION_STORE)
+  const existing = await requestResult<SessionRecord | undefined>(
+    store.get(sessionId) as IDBRequest<SessionRecord | undefined>,
+  )
+  if (existing) store.put({ ...existing, title: trimmed })
+  await txDone(tx)
 }
 
 /**

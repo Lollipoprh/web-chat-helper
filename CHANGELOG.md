@@ -8,6 +8,84 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
 本文件记录 Web Chat Helper 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.0.0] - 2026-11-23
+
+首个稳定版本：界面全面重建在设计令牌之上，运行过程本身成为可读、可回溯、可重试的一等公民。
+First stable release: the UI is rebuilt on design tokens, and a run itself is now first-class —
+readable, traceable and retryable.
+
+From 1.0.0 on, stored data, cross-context messages and tool contracts follow the 1.x compatibility
+policy in [docs/compatibility.md](docs/compatibility.md).
+自 1.0.0 起，存储结构、跨上下文消息与工具契约遵循
+[docs/compatibility.md](docs/compatibility.md) 中的 1.x 兼容性策略。
+
+### Added / 新增
+
+- **Design system and dark mode** — semantic CSS-variable tokens with `light-dark()`, a
+  light / dark / follow-system preference in settings, and 22 shared primitives (Button,
+  IconButton, Dialog, Tooltip, Menu, Segmented, Chip, Markdown, …).
+  **设计令牌与深色模式** —— 语义化 CSS 变量 + `light-dark()`，设置页提供浅色/深色/跟随系统三选，
+  并沉淀 22 个共享原语。
+- **Header HUD and context strip** — brand mark, session title (capped width) with rename /
+  new / delete beside it, run status pill, settings; a context strip shows the attached tab,
+  bound files and a compact usage meter.
+  **头部 HUD 与上下文条** —— 品牌标、定宽标题与重命名/新建/删除按钮、运行状态、设置；
+  上下文条展示当前标签页、绑定文件与紧凑用量条。
+- **Run blocks** — every assistant reply owns a block showing status · steps · duration, and
+  expanding it reveals the step timeline, live while streaming and from the task log afterwards.
+  Message actions add copy and edit-and-resend.
+  **运行块** —— 每条回复一个块，折叠显示状态/步数/耗时，展开是步骤时间线（流式实时、结束后读日志）；
+  消息动作支持复制与「编辑后重发」。
+- **Markdown rendering** — assistant replies render headings, lists, tables, quotes and fenced
+  code with per-block copy buttons; parsing is an in-repo parser, no `innerHTML`.
+  **Markdown 渲染** —— 标题/列表/表格/引用/代码块，代码块可复制；解析器自研，不碰 `innerHTML`。
+- **Session management** — search and per-row delete in the session menu, rename from the header.
+  **会话管理** —— 菜单内搜索与逐条删除，头部重命名。
+- **Page-aware empty state** — three tasks built from the current tab (translate into the UI
+  language / summarise / turn into a table) that send immediately.
+  **场景化空状态** —— 依据当前页面给出翻译/总结/整理表格三条建议，点击直接发送。
+- **Task records with locate** — a session-scoped run index that can jump back to the run in the
+  conversation and highlight it.
+  **任务记录与定位** —— 会话级运行索引，可跳回对话并高亮那次运行。
+- **Regenerate and resume** — the newest reply can be regenerated in place (old answer removed,
+  no duplicate user message), and an interrupted run can be resumed from the checkpoint banner.
+  **重新生成与续跑** —— 最新回复可原地重跑（删旧答、不重复提问），中断任务可从断点提示继续。
+- **File preview** — clicking a bound file chip shows the first 200 lines / 12k characters.
+  **文件预览** —— 点击绑定文件胶囊即可预览前 200 行。
+- **Session artifacts** — files written by `download_file` are listed with metadata only
+  (name, size, download id, time); content stays in the Downloads folder.
+  **会话产物** —— `download_file` 产出的文件按元数据登记（文件名、大小、下载 id、时间），
+  内容仍只存在于下载目录。
+- **Command palette** — `⌘K` / `Ctrl+K` searches sessions, `/` commands, providers and panel actions.
+  **命令面板** —— `⌘K` / `Ctrl+K` 搜索会话、`/` 指令、模型与面板动作。
+- **Wide layout** — from 600px the task records become a permanent right column instead of a
+  slide-over.
+  **宽栏两列** —— 内容区 ≥600px 时任务记录固定为右列，不再滑出。
+
+### Changed / 变更
+
+- Hover hints all use the shared `Tooltip`; no native `title` remains on interactive elements,
+  and a tooltip flips to the other side rather than covering its trigger.
+  **悬浮提示统一** —— 交互元素不再使用原生 `title`；空间不足时提示换边，不遮挡触发元素。
+- Rename / new / delete moved out of the session menu into the header; clearing (`/clear`) and
+  the task-list entry were removed from the menu, leaving the right-edge pull tab.
+  **头部动作外置** —— 重命名/新建/删除移到标题右侧；菜单移除清空（保留 `/clear`）与任务记录入口。
+- The extension version is now read from `package.json` by `manifest.config.ts` instead of being
+  duplicated there.
+  **版本号单一来源** —— `manifest.config.ts` 直接读 `package.json`，不再两处手写。
+
+### Fixed / 修复
+
+- The off-screen history pane could scroll the whole chat sideways by taking focus; panes are now
+  `overflow: clip` plus `inert` when hidden.
+  **隐藏面板不再把对话顶歪** —— 改用 `overflow: clip` 与 `inert`。
+- Dropdowns no longer close when scrolling their own list.
+  **下拉菜单不再因自身滚动而关闭。**
+- Dialogs no longer clip the focus ring of their first control at the top edge.
+  **对话框不再裁掉首个控件的焦点环上边。**
+- `download_file` reports the real byte length instead of the character count.
+  **`download_file` 改报真实字节数**（原为字符数）。
+
 ## [0.1.6] - 2026-11-22
 
 ### Added / 新增
@@ -357,7 +435,8 @@ model continues decision or gives the final answer.
   may still change. Check future release notes before upgrading.
   首个版本，供应商配置结构、跨上下文消息协议与工具参数仍可能调整，升级前请留意后续变更说明。
 
-[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v1.0.0
 [0.1.6]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.6
 [0.1.5]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.5
 [0.1.4]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.4

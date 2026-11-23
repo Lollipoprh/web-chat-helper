@@ -1,4 +1,5 @@
 import { defineManifest } from '@crxjs/vite-plugin'
+import { version } from './package.json'
 
 // Chrome 扩展 Manifest V3 定义
 // 路径相对于 vite.config.ts 所在目录（apps/chrome-extension）
@@ -10,8 +11,8 @@ export default defineManifest({
   // 因此必须声明 default_locale；界面内文案另由 src/shared/i18n.ts 负责
   description: '__MSG_extDescription__',
   default_locale: 'zh_CN',
-  // 版本号必须与 package.json 保持一致（Chrome 用的是这里声明的值）
-  version: '0.1.6',
+  // 版本号只在 package.json 维护，这里读同一份，避免两处手写走偏
+  version,
 
   // 权限：sidePanel 侧边栏、storage 存储配置、tabs 标签页访问、scripting 注入脚本、activeTab 当前标签页
   // downloads：供 download_file 工具把模型产出的文本另存到系统下载目录（无需用户绑定文件）
@@ -40,9 +41,24 @@ export default defineManifest({
     type: 'module',
   },
 
+  // 扩展图标：源图在 public/icons（由 1024 素材等比缩放生成）。
+  // 16/32 用于工具栏与扩展列表，48 用于管理页，128 用于安装与商店。
+  icons: {
+    16: 'icons/icon-16.png',
+    32: 'icons/icon-32.png',
+    48: 'icons/icon-48.png',
+    128: 'icons/icon-128.png',
+  },
+
   // 工具栏图标：点击后打开侧边栏（由 background 监听 chrome.action.onClicked）
   action: {
     default_title: '__MSG_actionTitle__',
+    default_icon: {
+      16: 'icons/icon-16.png',
+      32: 'icons/icon-32.png',
+      48: 'icons/icon-48.png',
+      128: 'icons/icon-128.png',
+    },
   },
 
   // 侧边栏入口（Chrome 114+）

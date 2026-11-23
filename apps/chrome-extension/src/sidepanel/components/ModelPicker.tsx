@@ -8,7 +8,7 @@ import {
 import { createPortal } from 'react-dom'
 import type { ProviderConfig } from 'llm-client'
 import { useI18n } from '../../shared/useI18n'
-import { color, fontSize, radius, space } from '../../ui'
+import { Icon, Tooltip, color, fontSize, radius, shadow, space } from '../../ui'
 
 interface ModelGroup {
   providerName: string
@@ -27,6 +27,10 @@ export interface ModelPickerProps {
   value: string
   disabled?: boolean
   onChange: (id: string) => void
+  /** 外层容器的尺寸约束；默认按内容收缩，输入区里可改成撑满剩余宽度 */
+  style?: CSSProperties
+  /** 输出方式说明（流式 / 非流式），只出现在触发按钮的悬浮提示里 */
+  streamingLabel?: string
 }
 
 const TRIGGER_STYLE: CSSProperties = {
@@ -56,6 +60,8 @@ export function ModelPicker({
   value,
   disabled = false,
   onChange,
+  style,
+  streamingLabel,
 }: ModelPickerProps) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
@@ -92,7 +98,10 @@ export function ModelPicker({
       if (event.key === 'Escape') setOpen(false)
     }
 
-    function close() {
+    function close(event?: Event) {
+      // 面板自身滚动（模型很多时）不应该把面板关掉
+      const target = event?.target
+      if (target instanceof Node && panelRef.current?.contains(target)) return
       setOpen(false)
     }
 
@@ -145,38 +154,52 @@ export function ModelPicker({
           background: color.surfaceMuted,
           border: `1px solid ${color.border}`,
           borderRadius: radius.md,
-          boxShadow: '0 -8px 24px rgba(15, 23, 42, 0.12)',
+          boxShadow: shadow.md,
         }
       : null
 
   return (
-    <div style={{ flex: '0 1 33%', minWidth: 0 }}>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={toggle}
-        disabled={disabled}
-        title={selected ? `${selected.name} · ${selected.model}` : t('picker.switchModel')}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        style={{
-          ...TRIGGER_STYLE,
-          color: disabled ? color.textFaint : color.textSecondary,
-          cursor: disabled ? 'not-allowed' : 'pointer',
-        }}
+    <div style={{ flex: '0 1 33%', minWidth: 0, ...style }}>
+      <Tooltip
+        content={
+          selected
+            ? [selected.name, selected.model, streamingLabel].filter(Boolean).join(' · ')
+            : t('picker.switchModel')
+        }
+        placement="bottom"
+        style={{ display: 'block', width: '100%' }}
       >
-        <span
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={toggle}
+          disabled={disabled}
+          aria-haspopup="listbox"
+          aria-expanded={open}
           style={{
-            flex: '1 1 auto',
-            minWidth: 0,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
+            ...TRIGGER_STYLE,
+            color: disabled ? color.textFaint : color.textSecondary,
+            cursor: disabled ? 'not-allowed' : 'pointer',
           }}
         >
-          {selected?.model ?? t('picker.selectModel')}
-        </span>
-      </button>
+          <span
+            style={{
+              flex: '1 1 auto',
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {selected?.model ?? t('picker.selectModel')}
+          </span>
+          <Icon
+            name="chevron-down"
+            size={12}
+            style={{ color: color.textFaint, marginLeft: space.xs }}
+          />
+        </button>
+      </Tooltip>
 
       {panelStyle &&
         createPortal(
@@ -212,8 +235,11 @@ export function ModelPicker({
                         border: 'none',
                         borderRadius: radius.sm,
                         padding: '5px 8px',
-                        background:
-                          isSelected || isHovered ? color.surface : 'transparent',
+                        background: isSelected
+                          ? color.primarySoft
+                          : isHovered
+                            ? color.surface
+                            : 'transparent',
                         color: isSelected ? color.primarySoftText : color.text,
                         fontWeight: isSelected ? 500 : 400,
                         fontSize: fontSize.sm,
