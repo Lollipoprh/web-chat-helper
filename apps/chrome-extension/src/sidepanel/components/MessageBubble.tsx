@@ -32,11 +32,19 @@ export function MessageBubble({ role, content, status, error }: MessageBubblePro
   }
 
   return (
-    <div style={bubble}>
+    <div
+      style={bubble}
+      // 流式回复持续追加文本：声明为 polite 区域，读屏会在停顿处播报增量
+      aria-live={status === 'streaming' ? 'polite' : undefined}
+      aria-busy={status === 'streaming' ? true : undefined}
+    >
       {content}
       {status === 'streaming' &&
         (content ? (
-          <span style={{ color: color.textFaint }}> ▍</span>
+          <span aria-hidden="true" style={{ color: color.textFaint }}>
+            {' '}
+            ▍
+          </span>
         ) : (
           <span style={{ color: color.textFaint }}>{t('message.generating')}</span>
         ))}

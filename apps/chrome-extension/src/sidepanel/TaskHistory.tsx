@@ -9,7 +9,19 @@ import {
   type LogTaskRecord,
   type LogTaskStatus,
 } from '../shared/step-log-storage'
-import { Badge, Button, Card, color, fontSize, radius, space, type BadgeTone } from '../ui'
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  LoadingRow,
+  SkeletonLines,
+  color,
+  fontSize,
+  radius,
+  space,
+  type BadgeTone,
+} from '../ui'
 import type { MessageKey } from '../shared/i18n'
 import { useI18n } from '../shared/useI18n'
 
@@ -106,9 +118,9 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
       </div>
 
       {loading ? (
-        <p style={{ color: color.textFaint }}>{t('common.loading')}</p>
+        <SkeletonLines lines={3} />
       ) : tasks.length === 0 ? (
-        <p style={{ color: color.textFaint }}>{t('history.empty')}</p>
+        <EmptyState compact icon="list" description={t('history.empty')} />
       ) : (
         tasks.map((task) => (
           <Card
@@ -131,7 +143,7 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
                   marginBottom: space.xs,
                 }}
               >
-                <Badge tone={STATUS_TONES[task.status]} style={{ marginLeft: 0 }}>
+                <Badge tone={STATUS_TONES[task.status]}>
                   {t(STATUS_LABELS[task.status])}
                 </Badge>
                 <span style={{ color: color.textFaint }}>{formatTime(task.createdAt)}</span>
@@ -174,7 +186,7 @@ export default function TaskHistory({ sessionId }: TaskHistoryProps) {
               >
                 {stepView?.taskId === task.taskId ? (
                   stepView.steps === null ? (
-                    <span style={{ color: color.textFaint }}>{t('history.readingSteps')}</span>
+                    <LoadingRow label={t('history.readingSteps')} />
                   ) : stepView.steps.length === 0 ? (
                     <span style={{ color: color.textFaint }}>{t('history.noSteps')}</span>
                   ) : (

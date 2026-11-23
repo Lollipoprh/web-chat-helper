@@ -3,7 +3,7 @@
 import type { AgentToolEvent } from 'agent-core'
 import { useI18n } from '../../shared/useI18n'
 import type { MessageKey } from '../../shared/i18n'
-import { Button, color, fontSize, radius, space } from '../../ui'
+import { Button, Icon, color, fontSize, radius, space } from '../../ui'
 
 const STATUS_META: Record<
   AgentToolEvent['status'],
@@ -52,7 +52,11 @@ export function ToolEventItem({ event, expanded, onToggle }: ToolEventItemProps)
           color: 'inherit',
         }}
       >
-        <span style={{ color: color.textFaint }}>{expanded ? '▾' : '▸'}</span>
+        <Icon
+          name={expanded ? 'chevron-down' : 'chevron-right'}
+          size={12}
+          style={{ color: color.textFaint }}
+        />
         <span style={{ fontFamily: 'monospace' }}>{event.name}</span>
         <span style={{ color: meta.color, fontWeight: 500 }}>{t(meta.labelKey)}</span>
         {typeof event.durationMs === 'number' && (

@@ -24,6 +24,8 @@ const zh = {
   'common.edit': '编辑',
   'common.loading': '加载中…',
   'common.settings': '设置',
+  'common.confirm': '确定',
+  'common.close': '关闭',
 
   'sidepanel.noProvider': '未配置供应商',
   'sidepanel.translateNeedsToolCalls':
@@ -52,7 +54,9 @@ const zh = {
   'sidepanel.deny': '拒绝',
   'sidepanel.noProviderTitle': '尚未配置模型供应商',
   'sidepanel.openSettings': '前往设置',
-  'sidepanel.emptyChat': '输入问题开始对话。',
+  'sidepanel.emptyChatTitle': '开始一个新任务',
+  'sidepanel.emptyChatHint':
+    '可以让我读取当前页面、填写表单、整理资料或翻译整页内容。',
   'sidepanel.tasks': '任务记录',
   'sidepanel.backToChat': '返回对话',
   'sidepanel.noSession': '尚未选择会话',
@@ -113,6 +117,15 @@ const zh = {
   'options.logStats': '当前有 {tasks} 个任务、{steps} 条步骤记录。',
   'options.footerNote':
     '说明：API Key 保存在 chrome.storage.local，并非操作系统级密钥保险库，仅供个人本机使用。运行日志与会话消息存放在 IndexedDB，与配置存储相互隔离。',
+  'options.generalTitle': '通用设置',
+  'options.appearanceTitle': '外观',
+  'options.appearanceDesc': '默认跟随系统；也可以固定为浅色或深色，修改后立即生效。',
+  'options.themeLabel': '主题',
+  'options.themeAuto': '跟随系统（{theme}）',
+  'options.themeLight': '浅色',
+  'options.themeDark': '深色',
+  'options.appearanceScopeNote':
+    '主题偏好保存在本机浏览器存储中，侧边栏与设置页共用同一份设置。',
   'options.languageTitle': '界面语言',
   'options.languageDesc':
     '默认跟随 Chrome 的界面语言，也可以固定为某一种。修改后侧边栏与设置页立即生效。',
@@ -187,7 +200,10 @@ const zh = {
   'sidepanel.granted': '已授权当前站点，请重新发送任务。',
   'sidepanel.grantDenied': '授权被拒绝，无法读取或操作当前页面。',
   'sidepanel.confirmClear': '确定清空当前对话吗？',
+  'sidepanel.clearDialogTitle': '清空对话',
   'sidepanel.confirmDeleteSession': '删除当前会话及其任务记录？',
+  'sidepanel.deleteDialogTitle': '删除会话',
+  'sidepanel.autoModeDialogTitle': '开启自动执行',
   'sidepanel.sessionLoadFailed': '会话加载失败，请重试。',
   'sidepanel.newSessionFailed': '新建会话失败，请重试。',
   'sidepanel.deleteSessionFailed': '删除会话失败，请重试。',
@@ -241,6 +257,8 @@ const en: Record<MessageKey, string> = {
   'common.edit': 'Edit',
   'common.loading': 'Loading…',
   'common.settings': 'Settings',
+  'common.confirm': 'Confirm',
+  'common.close': 'Close',
 
   'sidepanel.noProvider': 'No provider configured',
   'sidepanel.translateNeedsToolCalls':
@@ -269,7 +287,9 @@ const en: Record<MessageKey, string> = {
   'sidepanel.deny': 'Deny',
   'sidepanel.noProviderTitle': 'No model provider configured',
   'sidepanel.openSettings': 'Open settings',
-  'sidepanel.emptyChat': 'Type a question to start the conversation.',
+  'sidepanel.emptyChatTitle': 'Start a new task',
+  'sidepanel.emptyChatHint':
+    'Ask me to read this page, fill in a form, summarise material, or translate the whole page.',
   'sidepanel.tasks': 'Tasks',
   'sidepanel.backToChat': 'Back to chat',
   'sidepanel.noSession': 'No session selected',
@@ -330,6 +350,16 @@ const en: Record<MessageKey, string> = {
   'options.logStats': '{tasks} tasks and {steps} step records are stored right now.',
   'options.footerNote':
     'Note: API keys live in chrome.storage.local, which is not an OS-level secret vault, so use this on a personal machine only. Run logs and session messages live in IndexedDB, isolated from the config store.',
+  'options.generalTitle': 'General',
+  'options.appearanceTitle': 'Appearance',
+  'options.appearanceDesc':
+    'Follow the system by default, or pin light/dark. Changes apply immediately.',
+  'options.themeLabel': 'Theme',
+  'options.themeAuto': 'Follow system ({theme})',
+  'options.themeLight': 'Light',
+  'options.themeDark': 'Dark',
+  'options.appearanceScopeNote':
+    'The theme preference is stored in local browser storage and shared by the side panel and this page.',
   'options.languageTitle': 'Interface language',
   'options.languageDesc':
     'Follow Chrome by default, or pin one language. Changes apply to the side panel and this page immediately.',
@@ -407,7 +437,10 @@ const en: Record<MessageKey, string> = {
   'sidepanel.granted': 'Site access granted — please resend the task.',
   'sidepanel.grantDenied': 'Permission denied; the page cannot be read or operated on.',
   'sidepanel.confirmClear': 'Clear the current conversation?',
+  'sidepanel.clearDialogTitle': 'Clear conversation',
   'sidepanel.confirmDeleteSession': 'Delete this session and its task records?',
+  'sidepanel.deleteDialogTitle': 'Delete session',
+  'sidepanel.autoModeDialogTitle': 'Enable auto-run',
   'sidepanel.sessionLoadFailed': 'Failed to load the session. Please try again.',
   'sidepanel.newSessionFailed': 'Failed to create a session. Please try again.',
   'sidepanel.deleteSessionFailed': 'Failed to delete the session. Please try again.',

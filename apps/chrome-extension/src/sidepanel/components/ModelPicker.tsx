@@ -8,7 +8,7 @@ import {
 import { createPortal } from 'react-dom'
 import type { ProviderConfig } from 'llm-client'
 import { useI18n } from '../../shared/useI18n'
-import { color, fontSize, radius, space } from '../../ui'
+import { Icon, color, fontSize, radius, shadow, space } from '../../ui'
 
 interface ModelGroup {
   providerName: string
@@ -145,7 +145,7 @@ export function ModelPicker({
           background: color.surfaceMuted,
           border: `1px solid ${color.border}`,
           borderRadius: radius.md,
-          boxShadow: '0 -8px 24px rgba(15, 23, 42, 0.12)',
+          boxShadow: shadow.md,
         }
       : null
 
@@ -176,6 +176,11 @@ export function ModelPicker({
         >
           {selected?.model ?? t('picker.selectModel')}
         </span>
+        <Icon
+          name="chevron-down"
+          size={12}
+          style={{ color: color.textFaint, marginLeft: space.xs }}
+        />
       </button>
 
       {panelStyle &&
@@ -212,8 +217,11 @@ export function ModelPicker({
                         border: 'none',
                         borderRadius: radius.sm,
                         padding: '5px 8px',
-                        background:
-                          isSelected || isHovered ? color.surface : 'transparent',
+                        background: isSelected
+                          ? color.primarySoft
+                          : isHovered
+                            ? color.surface
+                            : 'transparent',
                         color: isSelected ? color.primarySoftText : color.text,
                         fontWeight: isSelected ? 500 : 400,
                         fontSize: fontSize.sm,

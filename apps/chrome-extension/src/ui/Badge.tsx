@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { color, fontSize, radius, space } from './tokens'
+import { color, fontSize, radius } from './tokens'
 import { cx, mergeStyle } from './style'
 
 export type BadgeTone = 'primary' | 'success' | 'warning' | 'danger' | 'neutral'
@@ -27,7 +27,7 @@ export function Badge({ tone = 'primary', children, style, className }: BadgePro
     fontSize: fontSize.xs,
     lineHeight: 1.6,
     borderRadius: radius.pill,
-    marginLeft: space.md,
+    whiteSpace: 'nowrap',
   }
 
   return (

@@ -89,7 +89,24 @@ import {
   runSlashCommand,
   type ParsedSlashCommand,
 } from './slash-commands'
-import { Alert, Button, Select, TextArea, color, fontSize, fontWeight, radius, space } from '../ui'
+import {
+  Alert,
+  Button,
+  EmptyState,
+  Icon,
+  IconButton,
+  LoadingRow,
+  Select,
+  TextArea,
+  color,
+  fontSize,
+  fontWeight,
+  radius,
+  space,
+  zIndex,
+} from '../ui'
+import { confirm } from '../shared/confirm'
+import { useApplyTheme } from '../shared/useTheme'
 import {
   bindFile,
   bindFileHandle,
@@ -143,6 +160,8 @@ interface UiMessage {
 
 export default function App() {
   const { t } = useI18n()
+  // 侧边栏只需要主题生效，不展示偏好值；系统主题变化由 CSS 的 light-dark() 处理
+  useApplyTheme()
   // 初始化 effect 只在挂载时跑一次：里面用到的 t 走 ref，避免切换语言时重跑并覆盖正在进行的会话
   const tRef = useRef(t)
   useEffect(() => {
@@ -363,7 +382,13 @@ export default function App() {
 
   const handleClear = useCallback(async () => {
     if (!activeSessionId || generating) return
-    if (!window.confirm(t('sidepanel.confirmClear'))) return
+    const confirmed = await confirm({
+      title: t('sidepanel.clearDialogTitle'),
+      message: t('sidepanel.confirmClear'),
+      confirmLabel: t('sidepanel.clearChat'),
+      confirmVariant: 'danger',
+    })
+    if (!confirmed) return
     abortRef.current?.abort()
     confirmResolverRef.current?.(false)
     confirmResolverRef.current = null
@@ -434,7 +459,13 @@ export default function App() {
 
   const handleDeleteSession = useCallback(async () => {
     if (generating || !activeSessionId) return
-    if (!window.confirm(t('sidepanel.confirmDeleteSession'))) return
+    const confirmed = await confirm({
+      title: t('sidepanel.deleteDialogTitle'),
+      message: t('sidepanel.confirmDeleteSession'),
+      confirmLabel: t('sidepanel.deleteSession'),
+      confirmVariant: 'danger',
+    })
+    if (!confirmed) return
 
     setHistoryLoaded(false)
     try {
@@ -503,8 +534,12 @@ export default function App() {
   const handleToggleSkipConfirm = useCallback(async () => {
     const next = !skipConfirm
     if (next) {
-      const ok = window.confirm(t('sidepanel.skipConfirmWarning'))
-      if (!ok) return
+      const confirmed = await confirm({
+        title: t('sidepanel.autoModeDialogTitle'),
+        message: t('sidepanel.skipConfirmWarning'),
+        confirmVariant: 'danger',
+      })
+      if (!confirmed) return
     }
     await saveSkipConfirm(next)
     setSkipConfirm(next)
@@ -1363,26 +1398,32 @@ export default function App() {
           gap: 8,
         }}
       >
-        <div style={{ minWidth: 0, flex: 1, fontSize: 13, fontWeight: 600 }}>
-          Web Chat Helper
-        </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={openOptions}
-          title={t('common.settings')}
-          aria-label={t('common.settings')}
+        <img
+          src="/icons/icon-48.png"
+          alt=""
+          aria-hidden="true"
+          width={20}
+          height={20}
+          style={{ flex: 'none', display: 'block' }}
+        />
+        <div
           style={{
-            width: 26,
-            height: 26,
-            padding: 0,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
+            minWidth: 0,
+            flex: 1,
+            fontSize: fontSize.lg,
+            fontWeight: fontWeight.semibold,
+            lineHeight: 1.3,
           }}
         >
-          <GearIcon />
-        </Button>
+          Web Chat Helper
+        </div>
+        <IconButton
+          icon="settings"
+          label={t('common.settings')}
+          size="sm"
+          variant="secondary"
+          onClick={openOptions}
+        />
       </header>
 
       <div
@@ -1497,7 +1538,7 @@ export default function App() {
             style={{
               background: color.surface,
               border: `1px solid ${color.warningBorder}`,
-              borderRadius: 4,
+              borderRadius: radius.sm,
               padding: '6px 8px',
               marginBottom: space.md,
               wordBreak: 'break-all',
@@ -1551,26 +1592,25 @@ export default function App() {
           <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
             <main style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
               {loading ? (
-                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
-                  {t('common.loading')}
-                </p>
+                <LoadingRow label={t('common.loading')} />
               ) : !provider ? (
-                <div
-                  style={{ textAlign: 'center', color: color.textSecondary, marginTop: 40 }}
-                >
-                  <p style={{ margin: 0 }}>{t('sidepanel.noProviderTitle')}</p>
-                  <Button
-                    variant="primary"
-                    style={{ marginTop: space.lg }}
-                    onClick={openOptions}
-                  >
-                    {t('sidepanel.openSettings')}
-                  </Button>
-                </div>
+                <EmptyState
+                  icon="settings"
+                  title={t('sidepanel.noProviderTitle')}
+                  action={
+                    <Button variant="primary" onClick={openOptions}>
+                      {t('sidepanel.openSettings')}
+                    </Button>
+                  }
+                  style={{ marginTop: space.xxl }}
+                />
               ) : messages.length === 0 ? (
-                <p style={{ color: color.textFaint, fontSize: fontSize.sm }}>
-                  {t('sidepanel.emptyChat')}
-                </p>
+                <EmptyState
+                  icon="info"
+                  title={t('sidepanel.emptyChatTitle')}
+                  description={t('sidepanel.emptyChatHint')}
+                  style={{ marginTop: space.xxl }}
+                />
               ) : (
                 messages.map((message) => (
                   <div
@@ -1687,35 +1727,23 @@ export default function App() {
                     <span style={{ flex: 'none', color: color.textFaint }}>
                       {formatFileSize(file.size)}
                     </span>
-                    <button
-                      type="button"
-                      title={t('sidepanel.unbind')}
-                      aria-label={t('sidepanel.unbind')}
+                    <IconButton
+                      icon="x"
+                      size="xs"
+                      label={t('sidepanel.unbind')}
                       onClick={() => void handleUnbindFile(file.name)}
-                      style={{
-                        flex: 'none',
-                        width: 16,
-                        height: 16,
-                        padding: 0,
-                        border: 'none',
-                        borderRadius: 3,
-                        background: 'transparent',
-                        color: color.textMuted,
-                        cursor: 'pointer',
-                        lineHeight: 1,
-                        fontFamily: 'inherit',
-                      }}
-                    >
-                      ×
-                    </button>
+                      style={{ background: 'transparent', color: color.textFaint }}
+                    />
                   </div>
                 ))}
               </div>
             )}
             {/* 输入区整体容器：上方真实输入框，下方单独一行放模型选择、权限选择和发送按钮 */}
             <div
+              className="ui-composer"
               style={{
                 borderRadius: radius.lg,
+                border: `1px solid ${color.border}`,
                 background: provider ? color.surface : color.surfaceMuted,
                 overflow: 'hidden',
               }}
@@ -1801,7 +1829,6 @@ export default function App() {
                   display: 'block',
                   border: 'none',
                   borderRadius: 0,
-                  outline: 'none',
                   background: 'transparent',
                   padding: '4px 8px',
                   maxHeight: 140,
@@ -1919,12 +1946,12 @@ export default function App() {
               style={{
                 position: 'absolute',
                 inset: 0,
-                zIndex: 10,
+                zIndex: zIndex.overlay,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 padding: space.xl,
-                background: 'rgba(17, 24, 39, 0.12)',
+                background: color.overlay,
                 backdropFilter: 'blur(3px)',
                 WebkitBackdropFilter: 'blur(3px)',
                 pointerEvents: 'none',
@@ -1985,6 +2012,7 @@ export default function App() {
 
 /**
  * 侧拉按钮：始终贴在内容区右边缘，距顶部的固定偏移量保证两个视图位置的上下一致。
+ * 命中区放大到 24×60（原先 16×56 低于 WCAG 2.5.8 的最小 24px），图形改用图标而非 ‹ 字符。
  */
 function PullTab({
   label,
@@ -1998,6 +2026,7 @@ function PullTab({
   return (
     <button
       type="button"
+      className="ui-pull-tab"
       onClick={onClick}
       disabled={disabled}
       title={label}
@@ -2006,24 +2035,24 @@ function PullTab({
         position: 'absolute',
         top: 100,
         right: 0,
-        zIndex: 5,
-        width: 16,
-        height: 56,
+        zIndex: zIndex.pullTab,
+        width: 24,
+        height: 60,
         padding: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         borderTop: `1px solid ${color.border}`,
         borderBottom: `1px solid ${color.border}`,
         borderLeft: `1px solid ${color.border}`,
         borderRight: 'none',
-        borderRadius: '6px 0 0 6px',
+        borderRadius: `${radius.md}px 0 0 ${radius.md}px`,
         background: color.surfaceMuted,
         color: disabled ? color.textFaint : color.textMuted,
-        fontFamily: 'inherit',
-        fontSize: 12,
-        lineHeight: 1,
         cursor: disabled ? 'not-allowed' : 'pointer',
       }}
     >
-      ‹
+      <Icon name="chevron-left" size={14} />
     </button>
   )
 }
@@ -2031,26 +2060,6 @@ function PullTab({
 function describeError(error: unknown): string {
   if (error instanceof LLMError) return error.message
   return error instanceof Error ? error.message : String(error)
-}
-
-/** 标题栏设置按钮的齿轮图标，避免引入图标依赖 */
-function GearIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.35a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.65 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.64h.01A1.7 1.7 0 0 0 10.04 3.08V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15.07 4.65a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 9v.01A1.7 1.7 0 0 0 20.92 10.04H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15z" />
-    </svg>
-  )
 }
 
 /** 拖拽内容是否包含文件 */

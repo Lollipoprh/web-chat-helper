@@ -3,7 +3,7 @@
 // 具体 token 数值只在鼠标悬浮时通过通用 Tooltip 显示。
 
 import { useI18n } from '../../shared/useI18n'
-import { Tooltip, color, radius } from '../../ui'
+import { Tooltip, color, radius, space } from '../../ui'
 
 export interface UsageMeterProps {
   inputTokens: number
@@ -42,7 +42,7 @@ export function UsageMeter({
       )} ${formatTokens(outputTokens)} · ${t('sidepanel.usageWindow')} ${formatTokens(contextWindow)}`
 
   return (
-    <div style={{ padding: '4px 12px 6px' }}>
+    <div style={{ padding: `${space.xs}px ${space.lg}px ${space.sm}px` }}>
       <Tooltip content={tooltip} placement="top" style={{ padding: '2px 0' }}>
         <div
           role="progressbar"
@@ -59,12 +59,8 @@ export function UsageMeter({
             boxSizing: 'border-box',
             background: full ? color.usageFull : color.usageTrack,
             // 细边线保留轮廓，外发光让边缘更柔和
-            border: `1px solid ${
-              full ? 'rgba(244, 81, 30, 0.4)' : 'rgba(37, 99, 235, 0.22)'
-            }`,
-            boxShadow: full
-              ? '0 0 8px rgba(244, 81, 30, 0.45)'
-              : '0 0 8px rgba(37, 99, 235, 0.28)',
+            border: `1px solid ${full ? color.usageFull : color.usageTrack}`,
+            boxShadow: `0 0 8px ${full ? color.usageGlowFull : color.usageGlow}`,
           }}
         >
           {!full && (

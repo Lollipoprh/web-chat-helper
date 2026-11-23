@@ -29,12 +29,16 @@ import ProviderForm from './ProviderForm'
 import { contentStyle, shellStyle, sidebarHeaderStyle, sidebarStyle } from './styles'
 import { LANG_PREF_VALUES, type LangPref } from '../shared/i18n'
 import { langDisplayName, useI18n, type I18n } from '../shared/useI18n'
+import { confirm } from '../shared/confirm'
+import { THEME_PREF_VALUES, themeNameKey, type ThemePref } from '../shared/theme'
+import { useTheme, useApplyTheme } from '../shared/useTheme'
 import {
   Alert,
   Badge,
   Button,
   Card,
   Field,
+  Icon,
   Input,
   PageHeader,
   Select,
@@ -42,18 +46,23 @@ import {
   fontSize,
   fontWeight,
   space,
+  type IconName,
 } from '../ui'
 
 type MenuKey = 'providers' | 'limits' | 'logs' | 'general'
 
 interface MenuItem {
   key: MenuKey
+  icon: IconName
   label: string
   desc: string
 }
 
 export default function App() {
   const { t, lang, pref, setPref } = useI18n()
+  // 设置页任何栏目都要用同一套主题：这里初始化一次，
+  // 否则停在「供应商」页时不会应用已保存的深色偏好（外观页的 useTheme 只在挂载时才触发）
+  useApplyTheme()
   // 只在挂载时读取一次的 effect 用 ref 取 t，避免切换语言触发重新拉取、覆盖未保存的表单
   const tRef = useRef(t)
   useEffect(() => {
@@ -65,10 +74,20 @@ export default function App() {
   // 语言放在最后一项：常用配置优先，语言属于一次性设置
   const menu: MenuItem[] = useMemo(
     () => [
-      { key: 'providers', label: t('options.navProviders'), desc: t('options.navProvidersDesc') },
-      { key: 'limits', label: t('options.navLimits'), desc: t('options.navLimitsDesc') },
-      { key: 'logs', label: t('options.navLogs'), desc: t('options.navLogsDesc') },
-      { key: 'general', label: t('options.navGeneral'), desc: t('options.navGeneralDesc') },
+      {
+        key: 'providers',
+        icon: 'server',
+        label: t('options.navProviders'),
+        desc: t('options.navProvidersDesc'),
+      },
+      { key: 'limits', icon: 'sliders', label: t('options.navLimits'), desc: t('options.navLimitsDesc') },
+      { key: 'logs', icon: 'list', label: t('options.navLogs'), desc: t('options.navLogsDesc') },
+      {
+        key: 'general',
+        icon: 'monitor',
+        label: t('options.navGeneral'),
+        desc: t('options.navGeneralDesc'),
+      },
     ],
     [t],
   )
@@ -176,7 +195,12 @@ export default function App() {
   }
 
   async function handleDelete(provider: ProviderConfig) {
-    const confirmed = window.confirm(t('options.confirmDeleteProvider', { name: provider.name }))
+    const confirmed = await confirm({
+      title: t('common.delete'),
+      message: t('options.confirmDeleteProvider', { name: provider.name }),
+      confirmLabel: t('common.delete'),
+      confirmVariant: 'danger',
+    })
     if (!confirmed) return
 
     try {
@@ -201,7 +225,12 @@ export default function App() {
   }
 
   async function handleClearLogs() {
-    const confirmed = window.confirm(t('options.confirmClearLogs'))
+    const confirmed = await confirm({
+      title: t('options.clearLogs'),
+      message: t('options.confirmClearLogs'),
+      confirmLabel: t('options.clearLogs'),
+      confirmVariant: 'danger',
+    })
     if (!confirmed) return
 
     try {
@@ -231,14 +260,16 @@ export default function App() {
   }
 
   async function handleResetLimits() {
-    const ok = window.confirm(
-      t('options.confirmResetLimits', {
+    const confirmed = await confirm({
+      title: t('options.reset'),
+      message: t('options.confirmResetLimits', {
         rounds: DEFAULT_AGENT_LIMITS.maxRounds,
         toolTimeout: DEFAULT_AGENT_LIMITS.toolTimeoutMs,
         requestTimeout: DEFAULT_AGENT_LIMITS.requestTimeoutMs,
       }),
-    )
-    if (!ok) return
+      confirmLabel: t('options.reset'),
+    })
+    if (!confirmed) return
     await resetAgentLimits()
     await refreshLimits()
     setLimitsSavedAt(Date.now())
@@ -263,8 +294,30 @@ export default function App() {
     <div style={shellStyle}>
       <aside style={sidebarStyle}>
         <div style={sidebarHeaderStyle}>
-          <div style={{ fontSize: fontSize.xs, color: color.textFaint, marginTop: 2 }}>
-            {t('common.settings')}
+          <div style={{ display: 'flex', alignItems: 'center', gap: space.md }}>
+            <img
+              src="/icons/icon-48.png"
+              alt=""
+              aria-hidden="true"
+              width={22}
+              height={22}
+              style={{ flex: 'none', display: 'block' }}
+            />
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: fontSize.lg,
+                  fontWeight: fontWeight.semibold,
+                  color: color.text,
+                  lineHeight: 1.3,
+                }}
+              >
+                Web Chat Helper
+              </div>
+              <div style={{ fontSize: fontSize.xs, color: color.textFaint, marginTop: 1 }}>
+                {t('common.settings')}
+              </div>
+            </div>
           </div>
         </div>
         <nav style={{ marginTop: space.lg }}>
@@ -276,8 +329,11 @@ export default function App() {
                 variant={active ? 'subtle' : 'text'}
                 block
                 onClick={() => setActiveMenu(item.key)}
+                aria-current={active ? 'page' : undefined}
                 style={{
-                  display: 'block',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: space.md,
                   textAlign: 'left',
                   padding: '10px 12px',
                   marginBottom: space.xs,
@@ -285,17 +341,25 @@ export default function App() {
                   color: active ? color.primarySoftText : color.textSecondary,
                 }}
               >
-                <div style={{ fontSize: fontSize.md, fontWeight: fontWeight.medium }}>
-                  {item.label}
-                </div>
-                <div
-                  style={{
-                    fontSize: fontSize.xs,
-                    color: active ? color.primary : color.textFaint,
-                    marginTop: 1,
-                  }}
-                >
-                  {item.desc}
+                <Icon
+                  name={item.icon}
+                  size={16}
+                  style={{ color: active ? color.primarySoftText : color.textFaint }}
+                />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: fontSize.md, fontWeight: fontWeight.medium }}>
+                    {item.label}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: fontSize.xs,
+                      // 激活状态下用柔和的浅蓝：直接用 primary 会在深色底上几乎看不见
+                      color: active ? color.primarySoftText : color.textFaint,
+                      marginTop: 1,
+                    }}
+                  >
+                    {item.desc}
+                  </div>
                 </div>
               </Button>
             )
@@ -442,7 +506,11 @@ function ProvidersPanel(props: ProvidersPanelProps) {
                         }}
                       >
                         {provider.name}
-                        {isDefault && <Badge>{t('options.defaultBadge')}</Badge>}
+                        {isDefault && (
+                          <Badge style={{ marginLeft: space.md }}>
+                            {t('options.defaultBadge')}
+                          </Badge>
+                        )}
                       </div>
                       <div
                         style={{ fontSize: fontSize.sm, color: color.textMuted, marginTop: space.xs }}
@@ -682,36 +750,64 @@ interface GeneralPanelProps {
 
 function GeneralPanel({ pref, currentLang, onPrefChange }: GeneralPanelProps) {
   const { t } = useI18n()
+  const theme = useTheme()
 
   return (
     <>
-      <PageHeader
-        title={t('options.languageTitle')}
-        description={t('options.languageDesc')}
-      />
+      <PageHeader title={t('options.generalTitle')} />
 
-      <Card>
-        <Field
-          label={t('options.languageLabel')}
-          hint={t('options.languageScopeNote')}
-        >
-          <Select
-            value={pref}
-            options={[
-              {
-                value: 'auto',
-                label: t('options.langAuto', { language: langDisplayName(currentLang) }),
-              },
-              { value: 'zh', label: t('options.langZh') },
-              { value: 'en', label: t('options.langEn') },
-            ]}
-            onChange={(event) => {
-              const next = event.target.value
-              if (!LANG_PREF_VALUES.includes(next as LangPref)) return
-              void onPrefChange(next as LangPref)
-            }}
-          />
-        </Field>
+      <Card title={t('options.appearanceTitle')} style={{ marginBottom: space.xl }}>
+        <p style={{ margin: '10px 0 0', fontSize: fontSize.sm, color: color.textMuted, lineHeight: 1.7 }}>
+          {t('options.appearanceDesc')}
+        </p>
+        <div style={{ marginTop: space.lg }}>
+          <Field label={t('options.themeLabel')} hint={t('options.appearanceScopeNote')}>
+            <Select
+              value={theme.pref}
+              style={{ maxWidth: 320 }}
+              options={[
+                {
+                  value: 'auto',
+                  label: t('options.themeAuto', { theme: t(themeNameKey(theme.resolved)) }),
+                },
+                { value: 'light', label: t('options.themeLight') },
+                { value: 'dark', label: t('options.themeDark') },
+              ]}
+              onChange={(event) => {
+                const next = event.target.value
+                if (!THEME_PREF_VALUES.includes(next as ThemePref)) return
+                void theme.setPref(next as ThemePref)
+              }}
+            />
+          </Field>
+        </div>
+      </Card>
+
+      <Card title={t('options.languageTitle')}>
+        <p style={{ margin: '10px 0 0', fontSize: fontSize.sm, color: color.textMuted, lineHeight: 1.7 }}>
+          {t('options.languageDesc')}
+        </p>
+        <div style={{ marginTop: space.lg }}>
+          <Field label={t('options.languageLabel')} hint={t('options.languageScopeNote')}>
+            <Select
+              value={pref}
+              style={{ maxWidth: 320 }}
+              options={[
+                {
+                  value: 'auto',
+                  label: t('options.langAuto', { language: langDisplayName(currentLang) }),
+                },
+                { value: 'zh', label: t('options.langZh') },
+                { value: 'en', label: t('options.langEn') },
+              ]}
+              onChange={(event) => {
+                const next = event.target.value
+                if (!LANG_PREF_VALUES.includes(next as LangPref)) return
+                void onPrefChange(next as LangPref)
+              }}
+            />
+          </Field>
+        </div>
       </Card>
     </>
   )

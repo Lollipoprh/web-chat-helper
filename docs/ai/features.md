@@ -45,7 +45,8 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 ## Side panel UI and chat interaction
 
 - Main UI: `apps/chrome-extension/src/sidepanel/App.tsx`
-- Header: title only plus a gear icon that opens Settings; the model name lives in the bottom `ModelPicker`
+- Header: title plus a settings `IconButton` (shared `Icon` set) that opens Settings; the model name lives in the bottom `ModelPicker`
+- Empty state (no provider / no messages) and loading rows use the shared `EmptyState` / `LoadingRow` primitives
 - Usage meter: `apps/chrome-extension/src/sidepanel/components/UsageMeter.tsx` — cumulative input/output tokens and context window with a progress bar
 - System prompt and task policies: `apps/chrome-extension/src/sidepanel/App.tsx` (`SYSTEM_PROMPT`) — page translation defaults to in-place DOM edits unless the user asks for a chat reply
 - Task history: `apps/chrome-extension/src/sidepanel/TaskHistory.tsx`
@@ -62,10 +63,30 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 
 ## UI components and design tokens
 
-- Design tokens (color, radius, font, spacing, control size): `apps/chrome-extension/src/ui/tokens.ts`
-- Shared primitives (Button, Input, TextArea, Select, Checkbox, Field, Alert, Card, Badge, PageHeader): `apps/chrome-extension/src/ui/`
+- Design tokens (numeric scales: radius, font size/weight, spacing, control size, shadow, motion, z-index, icon size): `apps/chrome-extension/src/ui/tokens.ts`
+- Color tokens are CSS variables, not literals: `apps/chrome-extension/src/ui/theme.css` (`--wc-*`) — light/dark via `light-dark()`, plus `:focus-visible` ring, `.ui-button` hover/active states, spinner and skeleton keyframes. `tokens.ts` only references `var(--wc-*)`, so every component is theme-aware without changes
+- Shared primitives: `apps/chrome-extension/src/ui/` — Button, IconButton, Icon, Input, TextArea, Select, Checkbox, Field, Alert, Card, Badge, Tooltip, Spinner/LoadingRow, Skeleton/SkeletonLines, EmptyState, Dialog
 - Component prop conventions and override rules: `apps/chrome-extension/src/ui/index.ts`
 - Settings-page layout styles: `apps/chrome-extension/src/options/styles.ts`
+
+## Brand assets
+
+- Extension icons (16/32/48/128, downscaled from the 1024px source artwork): `apps/chrome-extension/public/icons/`
+- Manifest declarations (`icons` + `action.default_icon`): `apps/chrome-extension/manifest.config.ts`
+- In-app brand mark (side panel header, settings sidebar) references `/icons/icon-48.png` from `apps/chrome-extension/src/sidepanel/App.tsx` and `apps/chrome-extension/src/options/App.tsx`; the settings tab favicon is set in `apps/chrome-extension/src/options/index.html`
+
+## Appearance and theme preference
+
+- Preference storage and DOM switch: `apps/chrome-extension/src/shared/theme.ts` (`ThemePref`, `UI_THEME_KEY`, `applyTheme`) — `auto` removes `<html data-theme>`, `light`/`dark` set it
+- React binding: `apps/chrome-extension/src/shared/useTheme.ts` (`useTheme` for the settings picker, `useApplyTheme` for pages that only need it applied) — module-level store + `chrome.storage.local` change listener + `matchMedia` listener
+- Theme picker (Settings → 通用 → 外观): `apps/chrome-extension/src/options/App.tsx` (`GeneralPanel`)
+- Entry stylesheet import (both pages): `apps/chrome-extension/src/sidepanel/main.tsx`, `apps/chrome-extension/src/options/main.tsx`
+
+## In-app confirmation dialog
+
+- Promise-based `confirm()` and the single `ConfirmHost`: `apps/chrome-extension/src/shared/confirm.tsx` — replaces every `window.confirm`, mounted next to `App` in both entry points
+- Dialog shell (scrim, Esc, focus trap, restore focus): `apps/chrome-extension/src/ui/Dialog.tsx`
+
 
 ## Sessions and task history storage
 
