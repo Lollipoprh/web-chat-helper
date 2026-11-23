@@ -1646,13 +1646,18 @@ export default function App() {
         </Alert>
       )}
 
-      {/* 内容区：对话栏与任务记录叠放在同一区域，用 transform 左右滑动切换 */}
-      <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+      {/* 内容区：对话栏与任务记录叠放在同一区域，用 transform 左右滑动切换。
+          overflow 必须用 clip 而不是 hidden：hidden 仍是可滚动容器，
+          一旦有元素（例如滑到屏外的任务记录里的按钮）被聚焦，浏览器会把容器
+          横向滚走，整个对话就会被推到左侧、看起来「左边显示不全」。 */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'clip' }}>
         {/* 对话栏：默认显示，展开任务记录时整体向左滑出 */}
         <div
           onDragOver={handleFileDragOver}
           onDragLeave={handleFileDragLeave}
           onDrop={handleFileDrop}
+          // 滑出屏幕后不能再接收焦点，否则焦点会把容器滚走
+          inert={view === 'history'}
           style={{
             position: 'absolute',
             inset: 0,
@@ -1665,7 +1670,8 @@ export default function App() {
         >
           {/* 消息区单独成层，侧拉按钮以此为基准垂直居中，不因输入框而偏移 */}
           <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
-            <main style={{ flex: 1, overflowY: 'auto', padding: '12px 14px' }}>
+            {/* overflow-x: clip —— 横向永不出现滚动条，避免长内容把消息列推歪 */}
+            <main style={{ flex: 1, overflowY: 'auto', overflowX: 'clip', padding: '12px 14px' }}>
               {loading ? (
                 <LoadingRow label={t('common.loading')} />
               ) : !provider ? (
@@ -2100,6 +2106,8 @@ export default function App() {
 
         {/* 任务记录：点击侧拉按钮时从右侧滑入 */}
         <aside
+          // 滑到屏外时不参与焦点顺序与命中测试
+          inert={view !== 'history'}
           style={{
             position: 'absolute',
             inset: 0,
@@ -2112,7 +2120,7 @@ export default function App() {
         >
           <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
             {/* 右侧留出侧拉按钮的宽度，避免列表内容与按钮边框重叠 */}
-            <main style={{ flex: 1, overflowY: 'auto', padding: '12px 32px 12px 14px' }}>
+            <main style={{ flex: 1, overflowY: 'auto', overflowX: 'clip', padding: '12px 32px 12px 14px' }}>
               {activeSessionId ? (
                 <TaskHistory
                   sessionId={activeSessionId}

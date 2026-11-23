@@ -50,6 +50,7 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 - Composer: one-line `TextArea` that grows to `COMPOSER_MAX_HEIGHT`, then a control row with `ModelPicker`, the confirm/auto `Segmented`, the attach `IconButton` and send/stop
 - Context strip under the composer: current-page chip (turns `danger` and grants permission on click when `pendingPageOrigin` matches the tab), one removable chip per bound file, and the compact `UsageMeter`
 - Side-effect approval bar sits just above the composer (`pendingConfirmation`) so confirmations do not push the transcript
+- Chat and task-history panes overlap and slide with `transform` inside an `overflow: clip` container, and the off-screen pane is `inert`. Do not change that back to `overflow: hidden`: a hidden-but-scrollable container lets focus scroll the pane sideways, which pushes the chat off-screen to the left
 - Empty state (no provider / no messages) and loading rows use the shared `EmptyState` / `LoadingRow` primitives
 - Usage meter: `apps/chrome-extension/src/sidepanel/components/UsageMeter.tsx` — compact bar + percentage, details on hover
 - System prompt and task policies: `apps/chrome-extension/src/sidepanel/App.tsx` (`SYSTEM_PROMPT`) — page translation defaults to in-place DOM edits unless the user asks for a chat reply
