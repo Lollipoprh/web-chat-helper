@@ -144,6 +144,9 @@ const COMPOSER_MAX_HEIGHT = 132
 /** 标题栏里会话标题的最大宽度：超出后省略，给右侧图标留位置 */
 const TITLE_MAX_WIDTH = 156
 
+/** 内容区宽度达到这个值就分成两列：左对话、右任务记录 */
+const WIDE_BREAKPOINT = 600
+
 /**
  * System prompt (English) —— concise, scope-locked.
  * Covers identity ("Web Chat Helper"), positioning (browser-side AI agent),
@@ -245,6 +248,30 @@ export default function App() {
 
   /** 平台对应的快捷键文案，用于空状态提示 */
   const shortcutLabel = /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘K' : 'Ctrl+K'
+
+  // 宽栏检测：≥600px 时把任务记录固定在右列，窄栏保持滑出层
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const [contentWidth, setContentWidth] = useState(0)
+  useEffect(() => {
+    const element = contentRef.current
+    if (!element) return
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0
+      setContentWidth(Math.round(width))
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  const wide = contentWidth >= WIDE_BREAKPOINT
+  // 右列占比约 36%，并限制在 280–340px，避免窄宽下挤掉对话
+  const asideWidth = wide
+    ? Math.min(340, Math.max(280, Math.round(contentWidth * 0.36)))
+    : 0
+
+  // 变宽时任务记录已经常驻可见，把滑出层的状态收回对话，缩窄后不会停在历史上
+  useEffect(() => {
+    if (wide) setView('chat')
+  }, [wide])
   // 文件管理：当前会话绑定的本地文件列表
   const [boundFiles, setBoundFiles] = useState<BoundFileMeta[]>([])
   // 当前会话累计 token 用量，用于标题栏下方的用量条
@@ -1837,21 +1864,27 @@ export default function App() {
           overflow 必须用 clip 而不是 hidden：hidden 仍是可滚动容器，
           一旦有元素（例如滑到屏外的任务记录里的按钮）被聚焦，浏览器会把容器
           横向滚走，整个对话就会被推到左侧、看起来「左边显示不全」。 */}
-      <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'clip' }}>
-        {/* 对话栏：默认显示，展开任务记录时整体向左滑出 */}
+      <div
+        ref={contentRef}
+        style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'clip' }}
+      >
+        {/* 对话栏：默认显示，展开任务记录时整体向左滑出（宽栏下两列并排，不滑动） */}
         <div
           onDragOver={handleFileDragOver}
           onDragLeave={handleFileDragLeave}
           onDrop={handleFileDrop}
           // 滑出屏幕后不能再接收焦点，否则焦点会把容器滚走
-          inert={view === 'history'}
+          inert={!wide && view === 'history'}
           style={{
             position: 'absolute',
-            inset: 0,
+            top: 0,
+            left: 0,
+            bottom: 0,
+            right: wide ? asideWidth : 0,
             display: 'flex',
             flexDirection: 'column',
             background: color.surface,
-            transform: view === 'history' ? 'translateX(-100%)' : 'translateX(0)',
+            transform: !wide && view === 'history' ? 'translateX(-100%)' : 'translateX(0)',
             transition: 'transform 240ms ease',
           }}
         >
@@ -1993,11 +2026,14 @@ export default function App() {
               )}
               <div ref={bottomRef} />
             </main>
-            <PullTab
-              label={t('sidepanel.tasks')}
-              disabled={!activeSessionId}
-              onClick={() => setView('history')}
-            />
+            {/* 宽栏下任务记录已在右列常驻，侧拉按钮不再需要 */}
+            {!wide && (
+              <PullTab
+                label={t('sidepanel.tasks')}
+                disabled={!activeSessionId}
+                onClick={() => setView('history')}
+              />
+            )}
           </div>
 
           <footer style={{ padding: 10, borderTop: `1px solid ${color.border}` }}>
@@ -2350,23 +2386,33 @@ export default function App() {
           )}
         </div>
 
-        {/* 任务记录：点击侧拉按钮时从右侧滑入 */}
+        {/* 任务记录：窄栏时点击侧拉按钮从右侧滑入；宽栏时固定在右列常驻 */}
         <aside
           // 滑到屏外时不参与焦点顺序与命中测试
-          inert={view !== 'history'}
+          inert={!wide && view !== 'history'}
           style={{
             position: 'absolute',
-            inset: 0,
+            top: 0,
+            bottom: 0,
+            ...(wide ? { right: 0, width: asideWidth } : { left: 0, right: 0 }),
             display: 'flex',
             flexDirection: 'column',
             background: color.surface,
-            transform: view === 'history' ? 'translateX(0)' : 'translateX(100%)',
+            borderLeft: wide ? `1px solid ${color.border}` : 'none',
+            transform: wide || view === 'history' ? 'translateX(0)' : 'translateX(100%)',
             transition: 'transform 240ms ease',
           }}
         >
           <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex' }}>
             {/* 右侧留出侧拉按钮的宽度，避免列表内容与按钮边框重叠 */}
-            <main style={{ flex: 1, overflowY: 'auto', overflowX: 'clip', padding: '12px 32px 12px 14px' }}>
+            <main
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                overflowX: 'clip',
+                padding: wide ? '12px 14px' : '12px 32px 12px 14px',
+              }}
+            >
               {activeSessionId ? (
                 <TaskHistory
                   sessionId={activeSessionId}
@@ -2380,11 +2426,13 @@ export default function App() {
                 </p>
               )}
             </main>
-            <PullTab
-              label={t('sidepanel.backToChat')}
-              disabled={!activeSessionId}
-              onClick={() => setView('chat')}
-            />
+            {!wide && (
+              <PullTab
+                label={t('sidepanel.backToChat')}
+                disabled={!activeSessionId}
+                onClick={() => setView('chat')}
+              />
+            )}
           </div>
         </aside>
       </div>

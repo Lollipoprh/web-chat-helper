@@ -184,15 +184,20 @@ export default function TaskHistory({
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: space.md,
+                  // 窄列（宽栏右列）里放不下一行时整体换行，而不是把时间挤成两行
+                  flexWrap: 'wrap',
+                  columnGap: space.md,
+                  rowGap: 4,
                   marginBottom: space.xs,
                 }}
               >
                 <Badge tone={STATUS_TONES[task.status]}>
                   {t(STATUS_LABELS[task.status])}
                 </Badge>
-                <span style={{ color: color.textFaint }}>{formatTime(task.createdAt)}</span>
-                <span style={{ color: color.textFaint, marginLeft: 'auto' }}>
+                <span style={{ color: color.textFaint, whiteSpace: 'nowrap' }}>
+                  {formatTime(task.createdAt)}
+                </span>
+                <span style={{ color: color.textFaint, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
                   {t('history.roundsSteps', { rounds: task.rounds, steps: task.stepCount })}
                   {task.droppedSteps > 0
                     ? t('history.dropped', { count: task.droppedSteps })
