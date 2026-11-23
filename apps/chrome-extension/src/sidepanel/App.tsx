@@ -32,6 +32,7 @@ import {
   clearSessionMessages,
   createSession,
   deleteSession,
+  deleteSessionMessage,
   ensureSessions,
   getSession,
   listSessions,
@@ -600,6 +601,24 @@ export default function App() {
     window.setTimeout(() => setFocusedRunId(null), 2000)
   }, [])
 
+  /** 重新生成：移除这条回答，用同一条用户消息重新跑一遍 */
+  const handleRegenerate = useCallback(
+    (assistantId: string) => {
+      if (generating) return
+      void handleSend(undefined, undefined, undefined, { assistantId })
+    },
+    // handleSend 是普通函数，依赖随渲染更新；这里只需要最新的 generating 与 messages
+    [generating, messages],
+  )
+
+  /** 继续上次被中断的任务：清掉检查点，把「继续」指令当作新一轮发送 */
+  const handleResumeInterrupted = useCallback(async () => {
+    if (generating) return
+    setInterruptedCheckpoint(null)
+    await clearAgentCheckpoint()
+    void handleSend(t('sidepanel.resumeTask'))
+  }, [generating, t])
+
   /** 保存会话重命名：空标题直接忽略，失败时提示并保留对话框 */
   const handleRenameSubmit = useCallback(async () => {
     if (!activeSessionId || renameDraft === null) return
@@ -729,15 +748,40 @@ export default function App() {
     })
   }
 
+  /**
+   * 发送一轮任务。
+   * retry 存在时表示「重新生成」：沿用那条回答对应的用户消息，
+   * 把旧回答从会话里移除后重跑，不再追加一条重复的用户消息。
+   */
   async function handleSend(
     textOverride?: string,
     sessionOverride?: string,
     historyOverride?: UiMessage[],
+    retry?: { assistantId: string },
   ) {
-    const text = (textOverride ?? input).trim()
+    const retryIndex = retry
+      ? messages.findIndex((message) => message.id === retry.assistantId)
+      : -1
+    const retryAssistant = retryIndex >= 0 ? messages[retryIndex] : null
+    // 旧回答之前的最后一条用户消息：文字、落盘记录都复用它
+    let retryUser: UiMessage | null = null
+    if (retryAssistant) {
+      for (let index = retryIndex - 1; index >= 0; index -= 1) {
+        const candidate = messages[index]
+        if (candidate.role === 'user' && candidate.kind !== 'notice') {
+          retryUser = candidate
+          break
+        }
+      }
+    }
+
+    const text = (retryUser?.content ?? textOverride ?? input).trim()
     const sessionId = sessionOverride ?? activeSessionId
-    const priorMessages = historyOverride ?? messages
+    const priorMessages = retryUser
+      ? messages.slice(0, messages.findIndex((message) => message.id === retryUser!.id))
+      : (historyOverride ?? messages)
     if (!text || !sessionId) return
+    if (retry && !retryUser) return
 
     // 指令回执只存在于前端：刷新即消失，也不会被带进模型请求
     const pushNotice = (content: string) => {
@@ -924,13 +968,15 @@ export default function App() {
     }
 
     const now = Date.now()
-    const userMessage: UiMessage = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: text,
-      status: 'complete',
-      createdAt: now,
-    }
+    const userMessage: UiMessage =
+      retryUser ??
+      {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: text,
+        status: 'complete',
+        createdAt: now,
+      }
     // 任务 ID 在发送时确定，日志、检查点、会话消息共用，便于按任务检索
     const taskId = crypto.randomUUID()
     const assistantId = crypto.randomUUID()
@@ -955,12 +1001,25 @@ export default function App() {
       .filter((message) => message.status === 'complete' && message.content)
       .map((message) => ({ role: message.role, content: message.content }))
 
-    setMessages((prev) => [...prev, userMessage, assistantMessage])
+    setMessages((prev) => {
+      // 重新生成：先把旧回答摘掉，用户消息已经存在，不再追加
+      const base = retryAssistant
+        ? prev.filter((message) => message.id !== retryAssistant.id)
+        : [...prev, userMessage]
+      return [...base, assistantMessage]
+    })
     // 右键菜单自动触发的任务不清空用户正在输入的草稿
     if (textOverride === undefined) setInput('')
     setBanner(pageWarning)
     setPendingPageOrigin(null)
     setGenerating(true)
+
+    // 旧回答从会话存储里删掉，避免刷新后又出现一题两答
+    if (retryAssistant) {
+      void deleteSessionMessage(sessionId, retryAssistant.id)
+        .then(() => refreshSessions())
+        .catch((error: unknown) => console.warn('[session] 删除旧回答失败', error))
+    }
 
     // 先挂上取消句柄，让记忆装配期间点击停止也能生效
     const controller = new AbortController()
@@ -988,16 +1047,18 @@ export default function App() {
     ]
 
     // 用户消息立即落盘；助手消息等结束后一次性写入，流式中间态不入库
-    void appendSessionMessage(sessionId, {
-      id: userMessage.id,
-      sessionId,
-      role: 'user',
-      content: userMessage.content,
-      status: 'complete',
-      createdAt: userMessage.createdAt,
-    })
-      .then(() => refreshSessions())
-      .catch((error: unknown) => console.warn('[session] 用户消息落盘失败', error))
+    if (!retryUser) {
+      void appendSessionMessage(sessionId, {
+        id: userMessage.id,
+        sessionId,
+        role: 'user',
+        content: userMessage.content,
+        status: 'complete',
+        createdAt: userMessage.createdAt,
+      })
+        .then(() => refreshSessions())
+        .catch((error: unknown) => console.warn('[session] 用户消息落盘失败', error))
+    }
 
     const taskStartPromise = recordTaskStart({
       taskId,
@@ -1677,6 +1738,9 @@ export default function App() {
           <span style={{ flex: 1 }}>
             {t('sidepanel.checkpointNotice', { rounds: interruptedCheckpoint.rounds })}
           </span>
+          <Button size="sm" variant="primary" onClick={() => void handleResumeInterrupted()}>
+            {t('sidepanel.resume')}
+          </Button>
           <Button
             size="sm"
             style={{
@@ -1770,7 +1834,7 @@ export default function App() {
                   style={{ marginTop: space.xxl }}
                 />
               ) : (
-                messages.map((message) => (
+                messages.map((message, index) => (
                   <div
                     key={message.id}
                     // 任务记录里「定位」据此滚动到这条回复
@@ -1799,6 +1863,15 @@ export default function App() {
                             task={message.taskId ? sessionTasks[message.taskId] : undefined}
                             events={message.toolEvents}
                             streaming={message.status === 'streaming'}
+                            // 只有最后一条回答可以原地重新生成：更早的回答后面还有对话，
+                            // 重跑会静默丢掉那些消息
+                            onRetry={
+                              index === messages.length - 1 &&
+                              message.status !== 'streaming' &&
+                              !generating
+                                ? () => handleRegenerate(message.id)
+                                : undefined
+                            }
                           />
                         </div>
                       )}

@@ -10,7 +10,7 @@ import type { AgentToolEvent } from 'agent-core'
 import { listTaskSteps, type LogTaskRecord, type LogStepRecord } from '../../shared/step-log-storage'
 import { useI18n } from '../../shared/useI18n'
 import type { MessageKey } from '../../shared/i18n'
-import { Icon, LoadingRow, color, fontSize, radius, space } from '../../ui'
+import { Icon, IconButton, LoadingRow, color, fontSize, radius, space } from '../../ui'
 import { ToolEventItem } from './ToolEventItem'
 
 export interface RunBlockProps {
@@ -22,6 +22,8 @@ export interface RunBlockProps {
   events?: AgentToolEvent[]
   /** 该条回复是否仍在流式生成 */
   streaming: boolean
+  /** 提供时显示「重新生成」按钮（调用方负责判断能否安全重跑） */
+  onRetry?: () => void
 }
 
 const TASK_STATUS_META: Record<
@@ -36,7 +38,13 @@ const TASK_STATUS_META: Record<
   round_limit: { labelKey: 'task.statusRoundLimit', tone: color.warningText },
 }
 
-export function RunBlock({ taskId, task, events, streaming }: RunBlockProps) {
+export function RunBlock({
+  taskId,
+  task,
+  events,
+  streaming,
+  onRetry,
+}: RunBlockProps) {
   const { t } = useI18n()
   // 用户手动点过的优先级高于默认值：运行中默认展开，结束后默认收起
   const [toggled, setToggled] = useState<boolean | null>(null)
@@ -104,44 +112,58 @@ export function RunBlock({ taskId, task, events, streaming }: RunBlockProps) {
         overflow: 'hidden',
       }}
     >
-      <button
-        type="button"
-        onClick={() => setToggled(!open)}
-        aria-expanded={open}
-        aria-label={t('run.toggle')}
-        className="ui-run-header"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: space.sm,
-          width: '100%',
-          boxSizing: 'border-box',
-          padding: '5px 8px',
-          border: 'none',
-          background: 'transparent',
-          color: color.textBody,
-          fontFamily: 'inherit',
-          fontSize: 'inherit',
-          textAlign: 'left',
-          cursor: 'pointer',
-        }}
-      >
-        <Icon
-          name={open ? 'chevron-down' : 'chevron-right'}
-          size={12}
-          style={{ color: color.textFaint }}
-        />
-        <span style={{ fontWeight: 500, color: color.textSecondary }}>{t('run.title')}</span>
-        <span style={{ color: statusMeta.tone }}>{t(statusMeta.labelKey)}</span>
-        <span style={{ color: color.textFaint }}>
-          {t('run.stepCount', { count: stepCount })}
-        </span>
-        {durationMs > 0 && (
-          <span style={{ color: color.textFaint, marginLeft: 'auto' }}>
-            {(durationMs / 1000).toFixed(1)}s
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        <button
+          type="button"
+          onClick={() => setToggled(!open)}
+          aria-expanded={open}
+          aria-label={t('run.toggle')}
+          className="ui-run-header"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: space.sm,
+            flex: 1,
+            minWidth: 0,
+            boxSizing: 'border-box',
+            padding: '5px 8px',
+            border: 'none',
+            background: 'transparent',
+            color: color.textBody,
+            fontFamily: 'inherit',
+            fontSize: 'inherit',
+            textAlign: 'left',
+            cursor: 'pointer',
+          }}
+        >
+          <Icon
+            name={open ? 'chevron-down' : 'chevron-right'}
+            size={12}
+            style={{ color: color.textFaint }}
+          />
+          <span style={{ fontWeight: 500, color: color.textSecondary }}>{t('run.title')}</span>
+          <span style={{ color: statusMeta.tone }}>{t(statusMeta.labelKey)}</span>
+          <span style={{ color: color.textFaint }}>
+            {t('run.stepCount', { count: stepCount })}
           </span>
+          {durationMs > 0 && (
+            <span style={{ color: color.textFaint, marginLeft: 'auto' }}>
+              {(durationMs / 1000).toFixed(1)}s
+            </span>
+          )}
+        </button>
+
+        {/* 重新生成：只对能安全重跑的那条回答出现（由调用方决定） */}
+        {onRetry && (
+          <IconButton
+            icon="refresh"
+            size="xs"
+            label={t('run.retry')}
+            onClick={onRetry}
+            style={{ flex: 'none', marginRight: 4, color: color.textFaint }}
+          />
         )}
-      </button>
+      </div>
 
       {open && (
         <div

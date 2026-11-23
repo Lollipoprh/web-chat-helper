@@ -140,9 +140,42 @@ export async function appendSessionMessage(
   await txDone(tx)
 }
 
-/** 清空会话消息但保留会话本身 */
-export async function clearSessionMessages(sessionId: string): Promise<void> {
+/**
+ * 删除单条消息并同步消息计数。
+ * 目前只用于「重新生成」：把上一次的回答从会话里去掉，再重跑同一个问题。
+ */
+export async function deleteSessionMessage(
+  sessionId: string,
+  messageId: string,
+): Promise<void> {
   const db = await openLocalDb()
+  const tx = db.transaction([SESSION_STORE, MESSAGE_STORE], 'readwrite')
+  const sessionStore = tx.objectStore(SESSION_STORE)
+  const messageStore = tx.objectStore(MESSAGE_STORE)
+
+  const session = await requestResult<SessionRecord | undefined>(
+    sessionStore.get(sessionId) as IDBRequest<SessionRecord | undefined>,
+  )
+  const existing = await requestResult<SessionMessageRecord | undefined>(
+    messageStore.get(messageId) as IDBRequest<SessionMessageRecord | undefined>,
+  )
+  if (!existing) {
+    await txDone(tx)
+    return
+  }
+
+  messageStore.delete(messageId)
+  if (session) {
+    sessionStore.put({
+      ...session,
+      messageCount: Math.max(0, session.messageCount - 1),
+    })
+  }
+  await txDone(tx)
+}
+
+/** 清空会话消息但保留会话本身 */
+export async function clearSessionMessages(sessionId: string): Promise<void> {  const db = await openLocalDb()
   const tx = db.transaction([SESSION_STORE, MESSAGE_STORE], 'readwrite')
   const sessionStore = tx.objectStore(SESSION_STORE)
 

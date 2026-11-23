@@ -57,7 +57,8 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 - Usage meter: `apps/chrome-extension/src/sidepanel/components/UsageMeter.tsx` — compact bar + percentage, details on hover
 - System prompt and task policies: `apps/chrome-extension/src/sidepanel/App.tsx` (`SYSTEM_PROMPT`) — page translation defaults to in-place DOM edits unless the user asks for a chat reply
 - Task history: `apps/chrome-extension/src/sidepanel/TaskHistory.tsx` — reads only the active session (`listSessionTasks(sessionId)`), shows the session title in its header, drops stale results when the session is switched mid-read, and offers a `定位` action that jumps back to that run in the conversation (messages carry `id="run-<taskId>"`, see `runAnchorId` in `App.tsx`; only runs whose message still exists get the button)
-- Run block (one per assistant reply): `apps/chrome-extension/src/sidepanel/components/RunBlock.tsx` — collapsed shows status · step count · duration; expanding shows the step timeline. Uses live `toolEvents` while streaming and `listTaskSteps(taskId)` afterwards
+- Run block (one per assistant reply): `apps/chrome-extension/src/sidepanel/components/RunBlock.tsx` — collapsed shows status · step count · duration; expanding shows the step timeline. Uses live `toolEvents` while streaming and `listTaskSteps(taskId)` afterwards. The last reply also gets a `重新生成` action: `handleSend(..., { assistantId })` removes that answer (`deleteSessionMessage`) and re-runs the same user message without appending a duplicate
+- Interrupted-run recovery: the checkpoint banner offers `继续` (`handleResumeInterrupted` clears the checkpoint and sends `sidepanel.resumeTask` as a new turn in the same session, relying on the transcript plus the run ledger instead of replaying raw loop state) or `清除`
 - Reply-to-task link: `SessionMessageRecord.taskId` (`apps/chrome-extension/src/shared/session-storage.ts`) is written with the assistant message so the run block survives a reload; older records simply render without one
 - Task summaries for run blocks (step count / duration) are cached per session in `App.tsx` (`refreshSessionTasks` ← `listSessionTasks`)
 - Message bubble and message actions (copy / edit-and-resend): `apps/chrome-extension/src/sidepanel/components/MessageBubble.tsx` — assistant text renders through Markdown, user text stays plain with preserved newlines; actions appear on hover or keyboard focus
@@ -133,6 +134,8 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 
 - Types: `packages/agent-core/src/types.ts` (`ConfirmationRequest`, `AgentCheckpoint`)
 - Storage: `apps/chrome-extension/src/shared/checkpoint-storage.ts`
+- Recovery semantics: the checkpoint keeps the raw loop messages but the UI never replays them; resuming sends a continue instruction as a normal turn and the model reconstructs state from the transcript, the session memory ledger and the current page
+- Regenerate: `deleteSessionMessage` in `apps/chrome-extension/src/shared/session-storage.ts` removes a single reply (and adjusts `messageCount`) so the same prompt can run again without leaving two answers
 
 ## Context injection and built-in commands
 

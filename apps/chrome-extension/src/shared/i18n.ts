@@ -47,7 +47,10 @@ const zh = {
   'sidepanel.grantSite': '授权当前站点',
   'sidepanel.notAuthorized': '当前页面尚未授权，无法操作',
   'sidepanel.checkpointNotice':
-    '上次任务已中断（第 {rounds} 轮）。为避免重放副作用步骤，恢复前请重新发送，不自动执行旧动作。',
+    '上次任务已中断（第 {rounds} 轮）。可以继续完成它，或清除这条提示。',
+  'sidepanel.resume': '继续',
+  'sidepanel.resumeTask':
+    '继续完成刚才被中断的任务。先确认已经完成的部分，再从断点继续，不要重复已完成的步骤。',
   'sidepanel.dismiss': '清除',
   'sidepanel.awaitingConfirmation': '等待确认：',
   'sidepanel.run': '确认执行',
@@ -214,6 +217,7 @@ const zh = {
   'message.edit': '编辑并重发',
 
   'run.title': '执行记录',
+  'run.retry': '重新生成这条回答',
   'run.stepCount': '{count} 步',
   'run.loading': '读取步骤…',
   'run.empty': '这一轮没有记录到工具调用',
@@ -309,7 +313,10 @@ const en: Record<MessageKey, string> = {
   'sidepanel.grantSite': 'Grant access to this site',
   'sidepanel.notAuthorized': 'This page is not authorized yet; cannot operate on it',
   'sidepanel.checkpointNotice':
-    'The previous task was interrupted (round {rounds}). To avoid replaying side-effecting steps, please resend instead of resuming; old actions are not re-executed automatically.',
+    'The previous task was interrupted (round {rounds}). You can resume it, or dismiss this notice.',
+  'sidepanel.resume': 'Resume',
+  'sidepanel.resumeTask':
+    'Continue the task that was interrupted. Check what is already done, then resume from there without repeating finished steps.',
   'sidepanel.dismiss': 'Dismiss',
   'sidepanel.awaitingConfirmation': 'Awaiting confirmation: ',
   'sidepanel.run': 'Run',
@@ -481,6 +488,7 @@ const en: Record<MessageKey, string> = {
   'message.edit': 'Edit and resend',
 
   'run.title': 'Run',
+  'run.retry': 'Regenerate this answer',
   'run.stepCount': '{count} steps',
   'run.loading': 'Loading steps…',
   'run.empty': 'No tool calls were recorded in this run',
