@@ -316,6 +316,28 @@ body {
   color: var(--wc-text);
 }
 
+/* 消息动作：悬浮或键盘聚焦到该行时出现，平时不抢占视觉与点击 */
+.msg-actions {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+
+.msg-row:hover .msg-actions,
+.msg-row:focus-within .msg-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 运行块的展开行 */
+.ui-run-header {
+  transition: background-color 120ms ease-out;
+}
+
+.ui-run-header:hover {
+  background: var(--wc-surface-subtle);
+}
+
 /* 侧栏右缘的侧拉标签：补上悬浮反馈，命中区在组件里放大到 24×60 */
 .ui-pull-tab {
   transition:

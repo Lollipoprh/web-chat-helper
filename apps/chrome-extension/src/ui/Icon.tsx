@@ -28,6 +28,8 @@ export type IconName =
   | 'arrow-up'
   | 'globe'
   | 'file'
+  | 'copy'
+  | 'pencil'
   | 'paperclip'
   | 'refresh'
   | 'alert'
@@ -131,6 +133,17 @@ const ICONS: Record<IconName, Shape[]> = {
   file: [
     { t: 'path', d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' },
     { t: 'path', d: 'M14 2v6h6' },
+  ],
+  copy: [
+    { t: 'rect', x: 9, y: 9, w: 13, h: 13, rx: 2 },
+    { t: 'path', d: 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' },
+  ],
+  pencil: [
+    {
+      t: 'path',
+      d: 'M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z',
+    },
+    { t: 'path', d: 'm15 5 4 4' },
   ],
   paperclip: [
     {

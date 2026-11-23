@@ -54,7 +54,11 @@ Use these product terms to find files and symbols. Line numbers belong in the ge
 - Usage meter: `apps/chrome-extension/src/sidepanel/components/UsageMeter.tsx` — compact bar + percentage, details on hover
 - System prompt and task policies: `apps/chrome-extension/src/sidepanel/App.tsx` (`SYSTEM_PROMPT`) — page translation defaults to in-place DOM edits unless the user asks for a chat reply
 - Task history: `apps/chrome-extension/src/sidepanel/TaskHistory.tsx` — reads only the active session (`listSessionTasks(sessionId)`), shows the session title in its header, and drops stale results when the session is switched mid-read
-- Message bubble and tool-call card: `apps/chrome-extension/src/sidepanel/components/`
+- Run block (one per assistant reply): `apps/chrome-extension/src/sidepanel/components/RunBlock.tsx` — collapsed shows status · step count · duration; expanding shows the step timeline. Uses live `toolEvents` while streaming and `listTaskSteps(taskId)` afterwards
+- Reply-to-task link: `SessionMessageRecord.taskId` (`apps/chrome-extension/src/shared/session-storage.ts`) is written with the assistant message so the run block survives a reload; older records simply render without one
+- Task summaries for run blocks (step count / duration) are cached per session in `App.tsx` (`refreshSessionTasks` ← `listSessionTasks`)
+- Message bubble and message actions (copy / edit-and-resend): `apps/chrome-extension/src/sidepanel/components/MessageBubble.tsx` — actions appear on hover or keyboard focus
+- Step row (used inside the run block): `apps/chrome-extension/src/sidepanel/components/ToolEventItem.tsx`
 
 ## Interface language (zh / en)
 

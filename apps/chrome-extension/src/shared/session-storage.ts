@@ -54,6 +54,11 @@ export interface SessionMessageRecord {
   error?: string
   /** 指令回执卡片；持久化并在界面展示，但永不进入模型请求 */
   kind?: 'notice'
+  /**
+   * 这条助手回复对应的运行任务 id。
+   * 用来在刷新后从任务日志里重新装配「执行记录」，旧记录没有该字段。
+   */
+  taskId?: string
 }
 
 /** 新建空白会话 */

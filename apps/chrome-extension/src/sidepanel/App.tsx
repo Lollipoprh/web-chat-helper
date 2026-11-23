@@ -57,6 +57,7 @@ import {
   pruneLogs,
   recordStep,
   recordTaskStart,
+  type LogTaskRecord,
   type LogTaskStatus,
 } from '../shared/step-log-storage'
 import {
@@ -80,7 +81,7 @@ import {
 import TaskHistory from './TaskHistory'
 import { MessageBubble, type MessageStatus } from './components/MessageBubble'
 import { ModelPicker } from './components/ModelPicker'
-import { ToolEventItem } from './components/ToolEventItem'
+import { RunBlock } from './components/RunBlock'
 import { UsageMeter } from './components/UsageMeter'
 import { loadSessionMemory } from './memory-assembly'
 import {
@@ -162,6 +163,8 @@ interface UiMessage {
   error?: string
   /** 本轮助手回复中发生的工具调用，仅当前会话可见 */
   toolEvents?: AgentToolEvent[]
+  /** 该条回复对应的运行任务；刷新后据此从任务日志重建执行记录 */
+  taskId?: string
   /** 指令回执等仅存在于前端的提示，刷新即消失，且永不进入模型请求 */
   kind?: 'notice'
 }
@@ -206,10 +209,8 @@ export default function App() {
     toolTimeoutMs: number
     requestTimeoutMs: number
   } | null>(null)
-  // 折叠 / 展开的工具调用事件 id 集合
-  const [expandedToolEvents, setExpandedToolEvents] = useState<Set<string>>(
-    () => new Set(),
-  )
+  // 当前会话的任务摘要（taskId → 记录），给运行块提供步数与耗时
+  const [sessionTasks, setSessionTasks] = useState<Record<string, LogTaskRecord>>({})
   // 文件管理：当前会话绑定的本地文件列表
   const [boundFiles, setBoundFiles] = useState<BoundFileMeta[]>([])
   // 当前会话累计 token 用量，用于标题栏下方的用量条
@@ -257,6 +258,18 @@ export default function App() {
     }
   }, [])
 
+  // 读取当前会话的任务摘要，供运行块展示「N 步 · X s」
+  const refreshSessionTasks = useCallback(async (sessionId: string) => {
+    try {
+      const records = await listSessionTasks(sessionId)
+      const map: Record<string, LogTaskRecord> = {}
+      for (const record of records) map[record.taskId] = record
+      setSessionTasks(map)
+    } catch (error) {
+      console.warn('[step-log] 读取任务摘要失败', error)
+    }
+  }, [])
+
   // 启动时收尾：把上次未正常结束的任务标为中断，并按保留策略清理过期日志
   useEffect(() => {
     void (async () => {
@@ -295,6 +308,7 @@ export default function App() {
           outputTokens: active?.outputTokens ?? 0,
         })
         setContextTokens(recordedContextTokens(active))
+        void refreshSessionTasks(initial.activeSessionId)
         if (checkpoint) setInterruptedCheckpoint(checkpoint)
         setSkipConfirm(skip)
         setAgentLimits(limits)
@@ -444,6 +458,7 @@ export default function App() {
           outputTokens: target?.outputTokens ?? 0,
         })
         setContextTokens(recordedContextTokens(target))
+        void refreshSessionTasks(sessionId)
         setActiveSessionId(sessionId)
         await saveActiveSessionId(sessionId)
       } catch (error) {
@@ -453,7 +468,7 @@ export default function App() {
         setHistoryLoaded(true)
       }
     },
-    [generating, historyLoaded, activeSessionId, sessions, t],
+    [generating, historyLoaded, activeSessionId, sessions, t, refreshSessionTasks],
   )
 
   const handleNewSession = useCallback(async () => {
@@ -537,13 +552,10 @@ export default function App() {
     setInterruptedCheckpoint(null)
   }, [])
 
-  const toggleToolEvent = useCallback((eventId: string) => {
-    setExpandedToolEvents((prev) => {
-      const next = new Set(prev)
-      if (next.has(eventId)) next.delete(eventId)
-      else next.add(eventId)
-      return next
-    })
+  /** 把历史消息放回输入框，用户改完再发；不删除原有记录 */
+  const handleEditMessage = useCallback((text: string) => {
+    setInput(text)
+    composerRef.current?.focus()
   }, [])
 
   /**
@@ -862,10 +874,13 @@ export default function App() {
       status: 'complete',
       createdAt: now,
     }
+    // 任务 ID 在发送时确定，日志、检查点、会话消息共用，便于按任务检索
+    const taskId = crypto.randomUUID()
     const assistantId = crypto.randomUUID()
     const assistantMessage: UiMessage = {
       id: assistantId,
       role: 'assistant',
+      taskId,
       content: '',
       status: 'streaming',
       createdAt: now + 1,
@@ -927,8 +942,6 @@ export default function App() {
       .then(() => refreshSessions())
       .catch((error: unknown) => console.warn('[session] 用户消息落盘失败', error))
 
-    // 任务 ID 在发送时确定，日志、检查点与会话共用，便于按任务检索
-    const taskId = crypto.randomUUID()
     const taskStartPromise = recordTaskStart({
       taskId,
       sessionId,
@@ -1212,6 +1225,7 @@ export default function App() {
           status: assistantStatus,
           createdAt: assistantMessage.createdAt,
           error: assistantError,
+          taskId,
         })
           .then(() => refreshSessions())
           .catch((error: unknown) => console.warn('[session] 助手消息落盘失败', error))
@@ -1219,6 +1233,8 @@ export default function App() {
       // 等任务记录创建完成再写最终状态，避免读到尚未落盘的任务
       void taskStartPromise
         .then(() => finishTask(taskId, taskStatus, taskStopReason))
+        // 收尾后刷新任务摘要，运行块的「N 步 · X s」才能拿到最终值
+        .then(() => refreshSessionTasks(sessionId))
         // 清理放到下一个任务队列，避免拖慢界面收尾
         .then(() => setTimeout(() => void pruneLogs(), 0))
         .catch((error: unknown) => console.warn('[step-log] 任务收尾失败', error))
@@ -1681,29 +1697,17 @@ export default function App() {
                       marginBottom: 10,
                     }}
                   >
-                    {/* 工具调用事件：默认收起显示名称/状态/耗时，点击展开参数与摘要，
-                        且排在回复文本之前 —— 用户先看到模型做了什么，再看到最终答复 */}
+                    {/* 一次运行一个块：折叠态是「状态 · 步数 · 耗时」，展开是步骤时间线。
+                        排在回复文本之前 —— 用户先看到模型做了什么，再看到最终答复 */}
                     {message.role === 'assistant' &&
-                      message.toolEvents &&
-                      message.toolEvents.length > 0 && (
-                        <div
-                          style={{
-                            maxWidth: '92%',
-                            width: '100%',
-                            marginBottom: 4,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 4,
-                          }}
-                        >
-                          {message.toolEvents.map((event) => (
-                            <ToolEventItem
-                              key={event.id}
-                              event={event}
-                              expanded={expandedToolEvents.has(event.id)}
-                              onToggle={() => toggleToolEvent(event.id)}
-                            />
-                          ))}
+                      (message.taskId || (message.toolEvents?.length ?? 0) > 0) && (
+                        <div style={{ maxWidth: '92%', width: '100%', marginBottom: space.xs }}>
+                          <RunBlock
+                            taskId={message.taskId}
+                            task={message.taskId ? sessionTasks[message.taskId] : undefined}
+                            events={message.toolEvents}
+                            streaming={message.status === 'streaming'}
+                          />
                         </div>
                       )}
 
@@ -1730,6 +1734,7 @@ export default function App() {
                         content={message.content}
                         status={message.status}
                         error={message.error}
+                        onEdit={handleEditMessage}
                       />
                     )}
                   </div>
@@ -2228,6 +2233,7 @@ function toUiMessage(record: SessionMessageRecord): UiMessage {
     status: record.status,
     createdAt: record.createdAt,
     error: record.error,
+    taskId: record.taskId,
     kind: record.kind,
   }
 }

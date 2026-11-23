@@ -197,6 +197,15 @@ const zh = {
   'message.generating': '正在生成…',
   'message.cancelled': '（已取消）',
   'message.failed': '生成失败',
+  'message.copy': '复制',
+  'message.copied': '已复制',
+  'message.edit': '编辑并重发',
+
+  'run.title': '执行记录',
+  'run.stepCount': '{count} 步',
+  'run.loading': '读取步骤…',
+  'run.empty': '这一轮没有记录到工具调用',
+  'run.toggle': '展开或收起执行记录',
 
   'picker.switchModel': '切换供应商模型',
   'picker.selectModel': '选择模型',
@@ -439,6 +448,15 @@ const en: Record<MessageKey, string> = {
   'message.generating': 'Generating…',
   'message.cancelled': ' (cancelled)',
   'message.failed': 'Generation failed',
+  'message.copy': 'Copy',
+  'message.copied': 'Copied',
+  'message.edit': 'Edit and resend',
+
+  'run.title': 'Run',
+  'run.stepCount': '{count} steps',
+  'run.loading': 'Loading steps…',
+  'run.empty': 'No tool calls were recorded in this run',
+  'run.toggle': 'Expand or collapse the run log',
 
   'picker.switchModel': 'Switch provider model',
   'picker.selectModel': 'Select model',
