@@ -82,6 +82,7 @@ import {
   setDefaultProvider,
 } from '../shared/storage'
 import TaskHistory from './TaskHistory'
+import { CommandPalette, type PaletteAction } from './components/CommandPalette'
 import { FilePreview } from './components/FilePreview'
 import { MessageBubble, type MessageStatus } from './components/MessageBubble'
 import { ModelPicker } from './components/ModelPicker'
@@ -225,6 +226,25 @@ export default function App() {
   const [focusedRunId, setFocusedRunId] = useState<string | null>(null)
   // 正在预览的已绑定文件；非 null 时打开预览对话框
   const [previewFile, setPreviewFile] = useState<BoundFileMeta | null>(null)
+  // 命令面板
+  const [paletteOpen, setPaletteOpen] = useState(false)
+
+  // ⌘K / Ctrl+K 开关命令面板；已有对话框时让位给对话框，避免浮层叠浮层
+  useEffect(() => {
+    // 这里的 KeyboardEvent 是全局事件类型（文件顶部的同名导入是 React 的合成事件）
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'k' || !(event.metaKey || event.ctrlKey)) return
+      if (event.altKey || event.shiftKey) return
+      if (renameDraft !== null || previewFile !== null) return
+      event.preventDefault()
+      setPaletteOpen((open) => !open)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [renameDraft, previewFile])
+
+  /** 平台对应的快捷键文案，用于空状态提示 */
+  const shortcutLabel = /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘K' : 'Ctrl+K'
   // 文件管理：当前会话绑定的本地文件列表
   const [boundFiles, setBoundFiles] = useState<BoundFileMeta[]>([])
   // 当前会话累计 token 用量，用于标题栏下方的用量条
@@ -1585,6 +1605,61 @@ export default function App() {
     [messages],
   )
 
+  // 命令面板动作：每次渲染重建，保证其中的 handleSend / handleSwitchSession 用的是最新状态
+  const paletteActions: PaletteAction[] = [
+    ...sessions.map((session) => ({
+      id: `session:${session.sessionId}`,
+      group: t('palette.sessions'),
+      label: session.title || t('sidepanel.noSession'),
+      hint: t('palette.messageCount', { count: session.messageCount }),
+      icon: 'list' as const,
+      run: () => void handleSwitchSession(session.sessionId),
+    })),
+    ...SLASH_COMMANDS.map((command) => ({
+      id: `command:${command.name}`,
+      group: t('palette.commands'),
+      label: `${command.usage} · ${t(command.descriptionKey)}`,
+      icon: 'sliders' as const,
+      run: () => void handleSend(`/${command.name}`),
+    })),
+    ...providers.map((item) => ({
+      id: `model:${item.id}`,
+      group: t('palette.models'),
+      label: item.model,
+      hint: item.name,
+      icon: 'server' as const,
+      run: () => void handleProviderChange(item.id),
+    })),
+    {
+      id: 'action:new-session',
+      group: t('palette.other'),
+      label: t('palette.newSession'),
+      icon: 'plus',
+      run: () => void handleNewSession(),
+    },
+    {
+      id: 'action:rename',
+      group: t('palette.other'),
+      label: t('palette.rename'),
+      icon: 'pencil',
+      run: () => setRenameDraft(activeSession?.title ?? ''),
+    },
+    {
+      id: 'action:tasks',
+      group: t('palette.other'),
+      label: t('palette.openTasks'),
+      icon: 'monitor',
+      run: () => setView('history'),
+    },
+    {
+      id: 'action:settings',
+      group: t('palette.other'),
+      label: t('palette.openSettings'),
+      icon: 'settings',
+      run: openOptions,
+    },
+  ]
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <header
@@ -1803,41 +1878,49 @@ export default function App() {
                   title={t('sidepanel.emptyChatTitle')}
                   description={t('sidepanel.emptyChatHint')}
                   action={
-                    pageSuggestions.length > 0 ? (
-                      <div
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: space.xs,
+                        width: '100%',
+                        maxWidth: 280,
+                      }}
+                    >
+                      {pageSuggestions.map((suggestion) => (
+                        <Button
+                          key={suggestion.key}
+                          variant="secondary"
+                          size="sm"
+                          disabled={generating || !provider}
+                          onClick={() => void handleSend(suggestion.task)}
+                          style={{
+                            justifyContent: 'flex-start',
+                            textAlign: 'left',
+                            whiteSpace: 'normal',
+                            lineHeight: 1.4,
+                            padding: '6px 10px',
+                            width: '100%',
+                          }}
+                        >
+                          {suggestion.label}
+                        </Button>
+                      ))}
+                      <span
                         style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: space.xs,
-                          width: '100%',
-                          maxWidth: 280,
+                          marginTop: 2,
+                          fontSize: fontSize.xs,
+                          color: color.textFaint,
                         }}
                       >
-                        {pageSuggestions.map((suggestion) => (
-                          <Button
-                            key={suggestion.key}
-                            variant="secondary"
-                            size="sm"
-                            disabled={generating || !provider}
-                            onClick={() => void handleSend(suggestion.task)}
-                            style={{
-                              justifyContent: 'flex-start',
-                              textAlign: 'left',
-                              whiteSpace: 'normal',
-                              lineHeight: 1.4,
-                              padding: '6px 10px',
-                            }}
-                          >
-                            {suggestion.label}
-                          </Button>
-                        ))}
-                      </div>
-                    ) : undefined
+                        {t('palette.hint', { shortcut: shortcutLabel })}
+                      </span>
+                    </div>
                   }
                   style={{ marginTop: space.xxl }}
                 />
-              ) : (
-                messages.map((message, index) => (
+              ) : (                messages.map((message, index) => (
                   <div
                     key={message.id}
                     // 任务记录里「定位」据此滚动到这条回复
@@ -2350,6 +2433,12 @@ export default function App() {
           onClose={() => setPreviewFile(null)}
         />
       )}
+
+      <CommandPalette
+        open={paletteOpen}
+        actions={paletteActions}
+        onClose={() => setPaletteOpen(false)}
+      />
     </div>
   )
 }
