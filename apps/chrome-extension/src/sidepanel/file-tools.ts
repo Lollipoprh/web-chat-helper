@@ -442,7 +442,7 @@ export function createFileTools(sessionId: string): AgentTool[] {
     {
       name: 'download_file',
       description:
-        'Save text content as a new file into the browser Downloads folder, without requiring the user to bind a file. Use this when the user wants a new file written and no bound file fits. filename is relative to the Downloads folder and may include a subdirectory, for example "notes/todo.md"; absolute paths and ".." are rejected. Give the file a descriptive name with the extension the user asked for — never use a generic name such as "download" or "export". An existing file with the same name is overwritten. This is a side-effecting action that requires user confirmation.',
+        'Save text content as a new file into the browser Downloads folder, without requiring the user to bind a file. Use this when the user wants a new file written and no bound file fits. filename is relative to the Downloads folder and may include a subdirectory, for example "notes/todo.md"; absolute paths and ".." are rejected. Give the file a descriptive name with the extension the user asked for — never use a generic name such as "download" or "export". Prefer one file per request: put the complete content in a single call instead of writing one file per section, and only split into several files when the user asks for separate files or the content is too large for one file. An existing file with the same name is overwritten. This is a side-effecting action that requires user confirmation.',
       parameters: {
         type: 'object',
         properties: {
