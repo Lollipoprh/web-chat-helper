@@ -40,17 +40,28 @@ export function Dialog({
   const restoreFocusRef = useRef<HTMLElement | null>(null)
   const titleId = useId()
 
+  // 父组件通常直接传内联箭头函数，每次渲染都是新引用。副作用只跟 open 走，
+  // 否则输入框每敲一个字都会重跑一遍：先恢复焦点、再抢到面板里最后一个控件，
+  // 表现就是「输入第一个字符就失焦」。
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
   useEffect(() => {
     if (!open) return
 
-    restoreFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null
-
-    // 默认聚焦最后一个可聚焦元素：对确认框来说就是主操作按钮
     const panel = panelRef.current
-    const items = panel ? Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)) : []
-    const target = items.length > 0 ? items[items.length - 1] : panel
-    target?.focus()
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null
+
+    // 子元素自带 autoFocus（例如重命名输入框）时焦点已在面板内，不要覆盖它
+    if (!panel || !active || !panel.contains(active)) {
+      restoreFocusRef.current = active
+      // 默认聚焦最后一个可聚焦元素：对确认框来说就是主操作按钮
+      const items = panel ? Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)) : []
+      const target = items.length > 0 ? items[items.length - 1] : panel
+      target?.focus()
+    }
 
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -59,7 +70,7 @@ export function Dialog({
       if (event.key === 'Escape') {
         event.preventDefault()
         event.stopPropagation()
-        onClose()
+        onCloseRef.current()
         return
       }
       if (event.key !== 'Tab') return
@@ -73,12 +84,12 @@ export function Dialog({
       }
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
-      const active = document.activeElement
+      const focused = document.activeElement
 
-      if (event.shiftKey && (active === first || !current.contains(active))) {
+      if (event.shiftKey && (focused === first || !current.contains(focused))) {
         event.preventDefault()
         last.focus()
-      } else if (!event.shiftKey && (active === last || !current.contains(active))) {
+      } else if (!event.shiftKey && (focused === last || !current.contains(focused))) {
         event.preventDefault()
         first.focus()
       }
@@ -88,9 +99,11 @@ export function Dialog({
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true)
       document.body.style.overflow = previousOverflow
-      restoreFocusRef.current?.focus()
+      const target = restoreFocusRef.current
+      restoreFocusRef.current = null
+      if (target?.isConnected) target.focus()
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
 

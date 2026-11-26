@@ -4,7 +4,7 @@
 
 | Module | Files | Lines | Workspace dependencies |
 | --- | ---: | ---: | --- |
-| apps/chrome-extension | 65 | 14905 | `agent-core`, `browser-tools`, `llm-client` |
+| apps/chrome-extension | 65 | 14918 | `agent-core`, `browser-tools`, `llm-client` |
 | packages/agent-core | 6 | 887 | `llm-client` |
 | packages/browser-tools | 3 | 789 | `agent-core` |
 | packages/llm-client | 7 | 871 | - |
