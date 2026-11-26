@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useI18n } from '../../shared/useI18n'
-import { IconButton, Markdown, color, fontSize, radius, space } from '../../ui'
+import { IconButton, Markdown, color, containsTable, fontSize, radius, space } from '../../ui'
 
 export type MessageStatus = 'complete' | 'streaming' | 'error' | 'cancelled'
 
@@ -25,6 +25,9 @@ export function MessageBubble({
   const { t } = useI18n()
   const isUser = role === 'user'
   const isError = !isUser && status === 'error'
+  // 表格比普通回复更吃横向宽度，别再额外让出 12% 的侧栏宽度给气泡留白
+  const hasTable = !isUser && containsTable(content)
+  const bubbleSurface = isError ? color.dangerSoft : color.surfaceSubtle
   const [copied, setCopied] = useState(false)
   const timerRef = useRef<number | null>(null)
 
@@ -54,7 +57,7 @@ export function MessageBubble({
     // 助手回复走 Markdown 渲染，块级元素自己控制换行；用户原文保留换行
     whiteSpace: isUser ? 'pre-wrap' : 'normal',
     wordBreak: 'break-word',
-    background: isUser ? color.primary : isError ? color.dangerSoft : color.surfaceSubtle,
+    background: isUser ? color.primary : bubbleSurface,
     color: isUser ? color.textInverse : color.text,
     border: isError ? `1px solid ${color.dangerBorder}` : 'none',
   }
@@ -74,7 +77,7 @@ export function MessageBubble({
         display: 'flex',
         flexDirection: 'column',
         alignItems: isUser ? 'flex-end' : 'flex-start',
-        maxWidth: '88%',
+        maxWidth: hasTable ? '100%' : '88%',
         minWidth: 0,
       }}
     >
@@ -84,7 +87,7 @@ export function MessageBubble({
         aria-live={status === 'streaming' ? 'polite' : undefined}
         aria-busy={status === 'streaming' ? true : undefined}
       >
-        {isUser ? content : <Markdown source={content} trailing={streamingCaret} />}
+        {isUser ? content : <Markdown source={content} trailing={streamingCaret} tableSurface={bubbleSurface} />}
         {status === 'streaming' &&
           !content && <span style={{ color: color.textFaint }}>{t('message.generating')}</span>}
         {status === 'cancelled' && (

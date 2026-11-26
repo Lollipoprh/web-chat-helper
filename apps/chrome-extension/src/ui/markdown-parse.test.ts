@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isSafeHref, parseInline, parseMarkdown } from './markdown-parse'
+import { containsTable, isSafeHref, parseInline, parseMarkdown } from './markdown-parse'
 
 describe('parseMarkdown 块级结构', () => {
   it('把围栏代码块原样保留，并带上语言', () => {
@@ -47,6 +47,20 @@ describe('parseMarkdown 块级结构', () => {
 
   it('空输入不产生块', () => {
     expect(parseMarkdown('   \n\n')).toEqual([])
+  })
+})
+
+describe('containsTable', () => {
+  it('识别带分隔行的表格', () => {
+    expect(containsTable('| a | b |\n| --- | --- |\n| 1 | 2 |')).toBe(true)
+  })
+
+  it('普通段落里的竖线不算表格', () => {
+    expect(containsTable('用 a | b 表示或运算')).toBe(false)
+  })
+
+  it('只有分隔行没有表头不算表格', () => {
+    expect(containsTable('| --- | --- |')).toBe(false)
   })
 })
 

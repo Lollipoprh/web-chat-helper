@@ -8,6 +8,35 @@ and version numbers follow [Semantic Versioning](https://semver.org/).
 本文件记录 Web Chat Helper 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.0.1] - 2026-11-26
+
+### Added / 新增
+
+- **One export per request** — the system prompt and the `download_file` tool now ask the model to
+  assemble the whole deliverable into a single file, to reuse that filename when a later request
+  updates it, and to split only when the user asks or the content is too large.
+  **每次请求一个导出文件** —— 系统提示与 `download_file` 工具要求模型把整份产物收在一个文件里，
+  后续请求更新同一产物时复用文件名，只有用户明确要求或内容过大才拆分。
+
+### Fixed / 修复
+
+- **Exported filenames survive Chrome's rewriting** — the download MIME now matches the requested
+  extension, so `report.md` no longer lands as `report.txt`; names without an extension get `.md`,
+  and generic names such as "download" fall back to the session title.
+  **导出文件名不再被改写** —— 下载 MIME 与目标扩展名对齐，`report.md` 不再落成 `report.txt`；
+  没写扩展名的补 `.md`，`下载`/`export` 这类通用名改用会话标题。
+- **Wide tables stay readable** — a wide markdown table scrolls horizontally inside its own region,
+  and a reply containing a table gets the full panel width for its bubble.
+  **宽表格保持可读** —— 宽表格在自身区域内横向滚动，含表格的回复气泡占满面板宽度。
+- **Composer height follows real content** — the textarea is measured without its placeholder and
+  re-measured when the width changes, so it no longer opens at maximum height and shrinks after the
+  first keystroke.
+  **输入框按真实内容定高** —— 测量时摘掉占位文案、在宽度变化时重算，不再出现「打开时最高、
+  敲第一个字就缩回」。
+- **Dialogs keep focus while typing** — the focus trap now runs only when a dialog opens, so the
+  first character typed into a dialog input no longer steals focus away.
+  **弹窗内输入不再失焦** —— 焦点陷阱只在弹窗打开时执行，输入第一个字符不会再把焦点抢走。
+
 ## [1.0.0] - 2026-11-23
 
 首个稳定版本：界面全面重建在设计令牌之上，运行过程本身成为可读、可回溯、可重试的一等公民。
@@ -435,7 +464,8 @@ model continues decision or gives the final answer.
   may still change. Check future release notes before upgrading.
   首个版本，供应商配置结构、跨上下文消息协议与工具参数仍可能调整，升级前请留意后续变更说明。
 
-[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Lollipoprh/web-chat-helper/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v1.0.1
 [1.0.0]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v1.0.0
 [0.1.6]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.6
 [0.1.5]: https://github.com/Lollipoprh/web-chat-helper/releases/tag/v0.1.5
