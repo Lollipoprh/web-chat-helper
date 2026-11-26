@@ -142,6 +142,24 @@ const TRANSLATE_REQUEST_TTL_MS = 60_000
 /** 输入框自动增高的上限：约 6 行，再多就在框内滚动 */
 const COMPOSER_MAX_HEIGHT = 132
 
+/**
+ * 让输入框高度贴合内容：空着时一行，多行输入后长到上限。
+ *
+ * placeholder 也参与 scrollHeight 计算：侧栏刚打开时 iframe 宽度可能还没铺开，
+ * 这段时间测量到的占位文案会折成很多行，空输入框被误判成「内容超高」而撑到上限
+ * （表现就是打开时输入框最高、敲第一个字才缩回一行）。所以测量期间先把
+ * placeholder 摘掉，测完在同一帧内恢复，用户看不到闪烁。
+ */
+function syncComposerHeight(element: HTMLTextAreaElement | null): void {
+  if (!element) return
+  const placeholder = element.placeholder
+  element.placeholder = ''
+  element.style.height = 'auto'
+  const next = Math.min(element.scrollHeight, COMPOSER_MAX_HEIGHT)
+  element.placeholder = placeholder
+  element.style.height = `${next}px`
+}
+
 /** 标题栏里会话标题的最大宽度：超出后省略，给右侧图标留位置 */
 const TITLE_MAX_WIDTH = 156
 
@@ -447,11 +465,23 @@ export default function App() {
 
   // 输入框随内容自动增高：空闲时只占一行，多行输入后再长到上限
   useEffect(() => {
+    syncComposerHeight(composerRef.current)
+  }, [input])
+
+  // 宽度变化时高度也要重算：侧栏第一次铺开、用户拖动面板宽度、多行文本重新折行，
+  // 高度都会变；同时兜住「首次测量时宽度还没就绪」的情况
+  useEffect(() => {
     const element = composerRef.current
     if (!element) return
-    element.style.height = 'auto'
-    element.style.height = `${Math.min(element.scrollHeight, COMPOSER_MAX_HEIGHT)}px`
-  }, [input])
+    let lastWidth = element.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth === lastWidth) return
+      lastWidth = element.clientWidth
+      syncComposerHeight(element)
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   const openOptions = useCallback(() => {
     chrome.runtime.openOptionsPage()
