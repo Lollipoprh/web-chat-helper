@@ -3,7 +3,7 @@
 // 全程不使用 innerHTML，模型输出里的任何 HTML 都只会作为文本显示；
 // 链接只放行 http(s) / mailto，并强制 target=_blank + rel=noopener。
 
-import { useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useI18n } from '../shared/useI18n'
 import { Icon } from './Icon'
 import { Tooltip } from './Tooltip'
@@ -14,12 +14,17 @@ export interface MarkdownProps {
   source: string
   /** 追加在正文末尾的节点（例如流式光标） */
   trailing?: ReactNode
+  /**
+   * 表格首列固定时的底色。必须与气泡背景一致，否则横向滚动时
+   * 滚过去的内容会从固定列下面透出来。默认按 surfaceSubtle 处理。
+   */
+  tableSurface?: string
 }
 
 const CODE_FONT =
   'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace'
 
-export function Markdown({ source, trailing }: MarkdownProps) {
+export function Markdown({ source, trailing, tableSurface }: MarkdownProps) {
   const blocks = parseMarkdown(source)
   if (blocks.length === 0) return <>{trailing}</>
 
@@ -29,6 +34,7 @@ export function Markdown({ source, trailing }: MarkdownProps) {
         <BlockView
           key={index}
           block={block}
+          tableSurface={tableSurface}
           trailing={index === blocks.length - 1 ? trailing : undefined}
         />
       ))}
@@ -36,7 +42,15 @@ export function Markdown({ source, trailing }: MarkdownProps) {
   )
 }
 
-function BlockView({ block, trailing }: { block: Block; trailing?: ReactNode }) {
+function BlockView({
+  block,
+  tableSurface,
+  trailing,
+}: {
+  block: Block
+  tableSurface?: string
+  trailing?: ReactNode
+}) {
   switch (block.type) {
     case 'paragraph':
       return (
@@ -122,58 +136,138 @@ function BlockView({ block, trailing }: { block: Block; trailing?: ReactNode }) 
     case 'table':
       return (
         <>
-          <TableView block={block} />
+          <TableView block={block} surface={tableSurface ?? color.surfaceSubtle} />
           {trailing}
         </>
       )
   }
 }
 
-function TableView({ block }: { block: Extract<Block, { type: 'table' }> }) {
+// 侧栏宽度有限，表格是唯一可能比容器宽的内容。策略是「先压再滚」：
+// 1. 表格宽度跟随气泡（100%），列宽由内容自动分配；
+// 2. 单元格允许在必要时断词（长 URL、长标识符），并保留最小列宽，
+//    避免表格被内容一路撑宽；
+// 3. 压到最小宽度仍放不下时，容器横向滚动，首列固定住，并在表格下方提示。
+function TableView({
+  block,
+  surface,
+}: {
+  block: Extract<Block, { type: 'table' }>
+  surface: string
+}) {
+  const { t } = useI18n()
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const [overflowing, setOverflowing] = useState(false)
+
+  // 只在真的溢出时才提示，避免每张窄表下面都挂一行没用的字。
+  // 观察容器和表格本身：两者任一尺寸变化（窗口宽度、流式追加内容）都能重新判断。
+  useEffect(() => {
+    const container = scrollRef.current
+    if (!container) return
+    const update = () => setOverflowing(container.scrollWidth - container.clientWidth > 1)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(container)
+    const table = container.firstElementChild
+    if (table) observer.observe(table)
+    return () => observer.disconnect()
+  }, [])
+
   const cell: CSSProperties = {
     padding: '3px 6px',
     border: `1px solid ${color.border}`,
     textAlign: 'left',
     verticalAlign: 'top',
     whiteSpace: 'normal',
+    // 默认单元格的最小宽度由最长的不可断词决定；anywhere 让长 URL 不再把整张表撑爆
+    overflowWrap: 'anywhere',
+    minWidth: 48,
+  }
+
+  // 首列固定：横向滚动时仍能对上是哪一行。底色必须与气泡一致，否则滚过的内容会透出来
+  const firstCell: CSSProperties = {
+    position: 'sticky',
+    left: 0,
+    background: surface,
+    boxShadow: `1px 0 0 ${color.border}`,
   }
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, maxWidth: '100%' }}>
+      <div
+        ref={scrollRef}
+        className="ui-table-scroll"
+        // 横向滚到边界时不要把整个侧栏一起带着滚
+        role="group"
+        aria-label={t('markdown.tableRegion')}
+        // 溢出时让容器可聚焦，键盘用户也能用方向键横向滚动
+        tabIndex={overflowing ? 0 : undefined}
         style={{
-          borderCollapse: 'collapse',
-          fontSize: fontSize.xs,
-          lineHeight: 1.5,
-          color: color.text,
-          width: 'max-content',
+          width: '100%',
           maxWidth: '100%',
+          minWidth: 0,
+          overflowX: 'auto',
+          overscrollBehaviorX: 'contain',
         }}
       >
-        <thead>
-          <tr>
-            {block.header.map((text, index) => (
-              <th
-                key={index}
-                style={{ ...cell, background: color.surfaceSubtle, fontWeight: fontWeight.medium }}
-              >
-                {renderInline(parseInline(text))}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {block.rows.map((row, rowIndex) => (
-            <tr key={rowIndex}>
-              {row.map((text, cellIndex) => (
-                <td key={cellIndex} style={cell}>
+        <table
+          style={{
+            borderCollapse: 'collapse',
+            fontSize: fontSize.xs,
+            lineHeight: 1.5,
+            color: color.text,
+            // 跟随气泡宽度；内容压不下去时由外层滚动接管
+            width: '100%',
+          }}
+        >
+          <thead>
+            <tr>
+              {block.header.map((text, index) => (
+                <th
+                  key={index}
+                  style={{
+                    ...cell,
+                    ...(index === 0 ? firstCell : null),
+                    background: color.surfaceSubtle,
+                    fontWeight: fontWeight.medium,
+                  }}
+                >
                   {renderInline(parseInline(text))}
-                </td>
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {block.rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {row.map((text, cellIndex) => (
+                  <td
+                    key={cellIndex}
+                    style={{ ...cell, ...(cellIndex === 0 ? firstCell : null) }}
+                  >
+                    {renderInline(parseInline(text))}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {overflowing && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: space.xs,
+            fontSize: fontSize.xs,
+            color: color.textFaint,
+          }}
+        >
+          <span aria-hidden="true">↔</span>
+          <span>{t('markdown.tableScrollHint')}</span>
+        </div>
+      )}
     </div>
   )
 }

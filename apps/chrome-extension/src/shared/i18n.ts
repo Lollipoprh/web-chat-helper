@@ -242,6 +242,9 @@ const zh = {
   'message.copied': '已复制',
   'message.edit': '编辑并重发',
 
+  'markdown.tableRegion': '数据表格',
+  'markdown.tableScrollHint': '表格较宽，可左右滑动查看完整内容',
+
   'run.title': '执行记录',
   'run.retry': '重新生成这条回答',
   'run.stepCount': '{count} 步',
@@ -538,6 +541,9 @@ const en: Record<MessageKey, string> = {
   'message.copy': 'Copy',
   'message.copied': 'Copied',
   'message.edit': 'Edit and resend',
+
+  'markdown.tableRegion': 'Data table',
+  'markdown.tableScrollHint': 'Wide table — scroll sideways to see the rest',
 
   'run.title': 'Run',
   'run.retry': 'Regenerate this answer',

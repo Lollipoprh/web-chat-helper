@@ -155,6 +155,19 @@ function splitRow(line: string): string[] {
 }
 
 /**
+ * 快速判断源码里有没有表格块。
+ * 气泡据此放宽宽度：表格比普通段落更吃横向空间，被 88% 的宽度限制住只会更容易溢出。
+ * 这里只扫一遍行、不做完整解析；误判的代价只是气泡宽了一点。
+ */
+export function containsTable(source: string): boolean {
+  const lines = source.replace(/\r\n?/g, '\n').split('\n')
+  for (let index = 0; index + 1 < lines.length; index += 1) {
+    if (lines[index].includes('|') && TABLE_DIVIDER.test(lines[index + 1])) return true
+  }
+  return false
+}
+
+/**
  * 行内解析。代码片段优先匹配，避免把 `a * b` 里的星号当成强调。
  * 不支持嵌套（例如加粗里再斜体），模型输出里极少出现，代价不值得。
  */

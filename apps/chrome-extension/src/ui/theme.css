@@ -338,6 +338,11 @@ body {
   background: var(--wc-surface-subtle);
 }
 
+/* 宽表格的横向滚动条：比全局更细，避免在窄侧栏里吃掉半行表格 */
+.ui-table-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
 /* 侧栏右缘的侧拉标签：补上悬浮反馈，命中区在组件里放大到 24×60 */
 .ui-pull-tab {
   transition:

@@ -4,7 +4,7 @@
 
 | Module | Files | Lines | Workspace dependencies |
 | --- | ---: | ---: | --- |
-| apps/chrome-extension | 65 | 14789 | `agent-core`, `browser-tools`, `llm-client` |
+| apps/chrome-extension | 65 | 14905 | `agent-core`, `browser-tools`, `llm-client` |
 | packages/agent-core | 6 | 887 | `llm-client` |
 | packages/browser-tools | 3 | 789 | `agent-core` |
 | packages/llm-client | 7 | 871 | - |
@@ -21,7 +21,7 @@
 | apps/chrome-extension/src/sidepanel/App.tsx | 2654 |
 | apps/chrome-extension/src/content/index.ts | 1441 |
 | apps/chrome-extension/src/options/App.tsx | 849 |
-| apps/chrome-extension/src/shared/i18n.ts | 666 |
+| apps/chrome-extension/src/shared/i18n.ts | 672 |
 | apps/chrome-extension/src/background/index.ts | 651 |
 | packages/browser-tools/src/tools.ts | 541 |
 | packages/agent-core/src/loop.ts | 540 |
